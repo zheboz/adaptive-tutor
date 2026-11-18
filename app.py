@@ -1,33 +1,23 @@
-from collections.abc import Sequence
 from html import escape
 
 import streamlit as st
 
 import tutor.planning as planning
+from tutor.assessment import practice_ui
 from tutor.llm import LLMError
 from tutor.materials import outline
+from tutor.materials.citations import render_sources
 from tutor.materials.ingest import PdfInputError, PdfPage, read_pdf_pages
-from tutor.materials.reader import READER_PANEL_HEIGHT, render_extracted_text, render_pdf_preview, show_page
+from tutor.materials.reader import READER_PANEL_HEIGHT, render_extracted_text, render_pdf_preview
 
 
 def reset_preview() -> None:
     for key in (
         "pdf_pages", "pdf_page_number", "study_outline", "unit_plan", "study_units",
         "study_plan", "study_target_days", "planned_days", "study_day",
+        "practice_index", "practice_sets", "practice_answers",
     ):
         st.session_state.pop(key, None)
-
-
-def render_sources(source_ids: Sequence[str], key_prefix: str) -> None:
-    with st.container(horizontal=True):
-        for source_id in source_ids:
-            number = int(source_id[1:])
-            st.button(
-                f"Page {number}",
-                key=f"{key_prefix}_{source_id}",
-                on_click=show_page,
-                args=(number,),
-            )
 
 
 def render_plan_controls(result: outline.Outline) -> None:
@@ -61,7 +51,7 @@ def render_plan_controls(result: outline.Outline) -> None:
             st.session_state.study_day = 1
 
 
-def render_study_plan() -> None:
+def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
     planned_days = st.session_state.planned_days
     units = st.session_state.study_units
     days = st.session_state.get("study_plan")
@@ -80,7 +70,10 @@ def render_study_plan() -> None:
     if number > len(days):
         st.info("Optional review day. Choose an earlier day to revisit its reading or repeat a study task.")
         return
-    for assignment in days[number - 1].assignments:
+    assignments = days[number - 1].assignments
+    scopes = [(practice_ui.practice_key(document_id, assignment), assignment) for assignment in assignments]
+    practice_ui.prepare_daily_practice(scopes, pages)
+    for scope, assignment in scopes:
         unit = assignment.unit
         action = assignment.kind.capitalize()
         task = ""
@@ -90,6 +83,7 @@ def render_study_plan() -> None:
             f"<p><strong>{action} · {escape(unit.title)}</strong><br>{escape(unit.objective)}</p>{task}"
         )
         render_sources(assignment.source_ids, f"plan_citation_{number}_{unit.unit_id}")
+        practice_ui.render_questions(scope)
 
 
 def prepare_outline(pages: list[PdfPage]) -> outline.Outline | None:
@@ -168,14 +162,14 @@ def main() -> None:
             render_plan_controls(result)
 
     has_plan = st.session_state.get("planned_days") is not None
-    preview_column, learning_column = st.columns(2, gap=12)
+    preview_column, learning_column = st.columns([3, 2] if has_plan else 2, gap=12)
     with preview_column:
         page = render_pdf_preview(upload, pages)
     with learning_column:
         if has_plan:
             st.header("Daily study plan")
             with st.container(height=READER_PANEL_HEIGHT, border=True, key="plan_panel"):
-                render_study_plan()
+                render_study_plan(pages, upload.file_id)
         else:
             render_outline(result, READER_PANEL_HEIGHT)
     if has_plan:

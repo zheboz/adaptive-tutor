@@ -1,6 +1,6 @@
 # Adaptive Tutor
 
-Adaptive Tutor turns a PDF into a study outline and a daily reading plan. Upload lecture notes to preview the original pages, then select **Generate outline** to send the readable page text to OpenAI. Choose how many days to spend on the material. Each day's plan shows what to read or practice and links to the supporting PDF pages.
+Adaptive Tutor turns a PDF into a study outline, a daily plan, and practice questions linked to their source pages. Upload lecture notes, generate an outline, and choose how many days to spend on the material. Each study day includes the option to practice what was assigned.
 
 The planned tutoring workflow will use the learner’s goals, deadline, and answers to schedule study sessions. The first course will cover variable updates, loop counts, and loop tracing in Python.
 
@@ -27,7 +27,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-The outline generator and study planner use the OpenAI SDK and read `OPENAI_API_KEY` from the server process environment. With the key already exported, start the app from the project root:
+The outline, planning, and practice features use the OpenAI SDK and read `OPENAI_API_KEY` from the server process environment. With the key already exported, start the app from the project root:
 
 ```bash
 python -m streamlit run app.py
@@ -53,6 +53,12 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 2. Choose a **Study day** to see its learning content and open the cited pages. A short plan groups complete units together. A longer plan can put the reading on one or more days and the unit's study task on the next. Any days left after all readings and tasks are marked for optional review.
 3. To adjust the pace, change the duration and submit again. Python redistributes the same units locally. The plan stays available while browsing the PDF in the current session and clears when the PDF changes.
 
+### Practicing a day's material
+
+1. Choose a study day and click **Generate daily practice** in the plan panel. Each assigned learning item gets 1–5 single-answer multiple-choice or true/false questions. Optional review days point back to the earlier assignments.
+2. The app indexes readable PDF passages locally and ranks them with BM25. It retrieves passages from the assigned pages and looks elsewhere in the same document for related exercises, including chapter-end questions. OpenAI uses these excerpts to reuse, adapt, or write questions. Each question links to its source pages and shows its origin.
+3. Select an option and click **Check answer** to see feedback and an explanation. The app identifies verified printed answer keys and labels other answers as model reference answers. Questions and submitted answers follow the same unit and cited pages when you change days or adjust the schedule. They are kept in the current PDF session.
+
 ## Planned architecture
 
 | Component | Responsibility |
@@ -68,6 +74,7 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 - [x] View the original PDF page by page and inspect its extracted text.
 - [x] Generate a PDF study outline with source page references.
 - [x] Schedule the full outline across a learner-selected number of days and browse each day's readings.
+- [x] Retrieve PDF passages and exercises for each day's learning items, generate practice, and check answers.
 - [ ] Support images and let learners select topics for their plan.
 - [ ] Connect the initial assessment, a fixed study plan, and practice exercises so learners can resume a session.
 - [ ] Add adaptive follow-up questions, review feedback against the evidence, and update plans based on learner responses.
