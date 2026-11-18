@@ -1,0 +1,18 @@
+# Local Python environment and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local credentials
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Uploaded materials, indexes, and learner records
+/data/
+
+# macOS metadata
+.DS_Store
