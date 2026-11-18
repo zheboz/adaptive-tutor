@@ -1,8 +1,8 @@
 # Adaptive Tutor
 
-Adaptive Tutor is a planned AI study assistant for people learning from their own lecture notes and handouts. Learners choose which topics to study, set a deadline, and enter the time they have each day. The tutor uses their answers to decide when to move on, ask a follow-up question, or revisit a prerequisite.
+Adaptive Tutor is a study assistant for people learning from their own lecture notes and handouts. Its first release lets you upload a PDF and inspect the extracted text one page at a time. The preview runs locally without an API key.
 
-The project is in the **design stage**. The first demo will cover three introductory Python concepts: updating a variable, counting loop iterations, and tracing a variable through a loop.
+The planned tutoring workflow will use the learner’s goals, deadline, and answers to schedule study sessions. The first course will cover variable updates, loop counts, and loop tracing in Python.
 
 ## Planned features
 
@@ -11,7 +11,7 @@ The project is in the **design stage**. The first demo will cover three introduc
 - **Diagnose gaps with follow-up questions.** When a wrong answer has several plausible causes, the tutor will choose a question that helps distinguish them. A topic will stay marked “needs more evidence” until the learner’s answers support a judgment.
 - **See why a plan changed.** Learners will be able to compare two versions of a plan, see which answer prompted a change, and check how much time the revised activity will take.
 
-## Example learning session
+## Example of a planned learning session
 
 A learner uploads a handout on loops and a screenshot of their class notes. They have 30 minutes a day for two weeks. During the initial assessment, they miscalculate the final value of a loop counter. To check whether the difficulty starts with assignment, the tutor asks, “What is the value of `x` after `x = 2` followed by `x = x + 1`?”
 
@@ -25,9 +25,10 @@ Use Python 3.13 to create a project-local environment. Run these commands from t
 python3.13 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+python -m streamlit run app.py
 ```
 
-The dependencies include Streamlit for the interface, pypdf for text extraction, the OpenAI SDK for outline generation, and LangGraph for the tutor workflow. The web app entry point and launch instructions are planned for the first runnable release.
+In the browser, upload one PDF with selectable text and choose a page to preview its contents. Image-only scans need optical character recognition (OCR), which is planned for a later release.
 
 ## Planned architecture
 
@@ -41,7 +42,8 @@ The dependencies include Streamlit for the interface, pypdf for text extraction,
 ## Development roadmap
 
 - [x] Define the first learning scenario and add the project description and Git ignore rules.
-- [ ] Support PDF and image uploads and generate a selectable outline with source references.
+- [x] Upload a PDF and preview its extracted text by page.
+- [ ] Support images and generate a selectable outline with source references.
 - [ ] Connect the initial assessment, a fixed study plan, and practice exercises so learners can resume a session.
 - [ ] Add adaptive follow-up questions, review feedback against the evidence, and update plans based on learner responses.
 - [ ] Add support for Word documents and publish the web demo and usage guide.
