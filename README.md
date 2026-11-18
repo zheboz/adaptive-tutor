@@ -19,14 +19,15 @@ If the learner answers `3`, the tutor asks how many times the loop runs. If they
 
 ## Getting started
 
-This version contains the project description and Git ignore rules. To prepare a Python environment on macOS or Linux, run the following commands from the project root:
+Use Python 3.13 to create a project-local environment. Run these commands from the project root on macOS or Linux.
 
 ```bash
-python3 -m venv .venv
+python3.13 -m venv .venv
 source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-The first runnable release will include the web app entry point, a dependency list, and launch instructions.
+The dependencies include Streamlit for the interface, pypdf for text extraction, the OpenAI SDK for outline generation, and LangGraph for the tutor workflow. The web app entry point and launch instructions are planned for the first runnable release.
 
 ## Planned architecture
 
