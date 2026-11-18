@@ -1,21 +1,21 @@
 # Adaptive Tutor
 
-Adaptive Tutor helps learners turn their own lecture notes into a study outline. Upload a PDF to see its original pages, including figures, tables, and scans. Select **Generate outline** to send the readable page text to OpenAI. Each topic includes a summary and page buttons that open the supporting material in the preview.
+Adaptive Tutor turns a PDF into a study outline and a daily reading plan. Upload lecture notes to preview the original pages, then select **Generate outline** to send the readable page text to OpenAI. Choose how many days to spend on the material. Each day's plan shows what to read or practice and links to the supporting PDF pages.
 
 The planned tutoring workflow will use the learner’s goals, deadline, and answers to schedule study sessions. The first course will cover variable updates, loop counts, and loop tracing in Python.
 
 ## Planned features
 
 - **Choose what to study.** Learners will be able to select topics from an outline built across multiple PDFs and images.
-- **Build a daily study plan.** The tutor will use the selected topics, an initial assessment, and prerequisite relationships to schedule readings and exercises. If the work exceeds the time available, it will flag the conflict so the learner can adjust the scope or deadline.
+- **Personalize the daily study plan.** The tutor will use the selected topics, an initial assessment, and prerequisite relationships to schedule readings and exercises.
 - **Diagnose gaps with follow-up questions.** When a wrong answer has several plausible causes, the tutor will choose a question that helps distinguish them. A topic will stay marked “needs more evidence” until the learner’s answers support a judgment.
-- **See why a plan changed.** Learners will be able to compare two versions of a plan, see which answer prompted a change, and check how much time the revised activity will take.
+- **See why a plan changed.** Learners will be able to compare two versions of a plan and see which answer prompted a change to a day's activities.
 
 ## Example of a planned learning session
 
-A learner uploads a handout on loops and a screenshot of their class notes. They have 30 minutes a day for two weeks. During the initial assessment, they miscalculate the final value of a loop counter. To check whether the difficulty starts with assignment, the tutor asks, “What is the value of `x` after `x = 2` followed by `x = x + 1`?”
+A learner uploads a handout on loops and a screenshot of their class notes. They want to finish the material in two weeks. During the initial assessment, they miscalculate the final value of a loop counter. To check whether the difficulty starts with assignment, the tutor asks, “What is the value of `x` after `x = 2` followed by `x = x + 1`?”
 
-If the learner answers `3`, the tutor asks how many times the loop runs. If they answer `2`, it points to an assignment example in the handout and asks them to try again with different numbers. If their answers continue to suggest difficulty with assignment, the tutor can split the next day’s 30-minute session into 10 minutes of variable updates and 20 minutes of loop tracing.
+If the learner answers `3`, the tutor asks how many times the loop runs. If they answer `2`, it points to an assignment example in the handout and asks them to try again with different numbers. If their answers continue to suggest difficulty with assignment, the tutor can schedule variable updates before loop tracing the next day.
 
 ## Getting started
 
@@ -27,7 +27,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-The outline generator uses the OpenAI SDK and reads `OPENAI_API_KEY` from the server process environment. With the key already exported, start the app from the project root:
+The outline generator and study planner use the OpenAI SDK and read `OPENAI_API_KEY` from the server process environment. With the key already exported, start the app from the project root:
 
 ```bash
 python -m streamlit run app.py
@@ -39,13 +39,19 @@ If your key is in a local `.env` file, you can use `uv` to supply it to the same
 uv run --no-project --env-file .env -- .venv/bin/python -m streamlit run app.py
 ```
 
-The default outline model is `gpt-4.1-mini`. To choose another model that supports structured outputs, set `OPENAI_MODEL` in the server environment.
+The default model is `gpt-4.1-mini`. To choose another model that supports structured outputs, set `OPENAI_MODEL` in the server environment.
 
 ### Generating an outline
 
 1. Upload a PDF and use the page selector to read the original document. Expand **Extracted text** to see which text is available for the outline. The preview works offline.
 2. Click **Generate outline**. Short documents use one model request. Longer documents are processed in batches; topics with matching titles are combined in page order. Blank, image-only, or unreadable pages are skipped.
 3. Select a page reference under a topic to check its summary against the original PDF page. Switching pages reuses the outline. Removing or replacing the PDF clears it.
+
+### Scheduling the outline
+
+1. Under **Daily study plan**, enter the **Target duration (days)** and select **Create study plan**. The first submission runs a two-step Plan-and-Solve workflow with OpenAI. The planning request uses the full outline to group or split topics into ordered learning units. The second request follows that plan to write a learning objective and a study task for each unit. The app checks topic coverage and takes the page references from the outline.
+2. Choose a **Study day** to see its learning content and open the cited pages. A short plan groups complete units together. A longer plan can put the reading on one or more days and the unit's study task on the next. Any days left after all readings and tasks are marked for optional review.
+3. To adjust the pace, change the duration and submit again. Python redistributes the same units locally. The plan stays available while browsing the PDF in the current session and clears when the PDF changes.
 
 ## Planned architecture
 
@@ -54,13 +60,14 @@ The default outline model is `gpt-4.1-mini`. To choose another model that suppor
 | Streamlit interface | Let learners upload materials, confirm the outline, submit answers, and compare plans. |
 | Document parsing and retrieval (RAG) | Index passages by file and location, then retrieve the source text for questions and feedback. |
 | LangGraph workflow | Use answer evidence to choose the next step in assessment, follow-up, practice, or replanning. |
-| Python scheduler and SQLite storage | Check daily time limits and prerequisite order. Save sessions, answers, and plan versions. |
+| Python scheduler and SQLite storage | Assign readings and activities to days in learning order. Save sessions, answers, and plan versions. |
 
 ## Development roadmap
 
 - [x] Define the first learning scenario and add the project description and Git ignore rules.
 - [x] View the original PDF page by page and inspect its extracted text.
 - [x] Generate a PDF study outline with source page references.
+- [x] Schedule the full outline across a learner-selected number of days and browse each day's readings.
 - [ ] Support images and let learners select topics for their plan.
 - [ ] Connect the initial assessment, a fixed study plan, and practice exercises so learners can resume a session.
 - [ ] Add adaptive follow-up questions, review feedback against the evidence, and update plans based on learner responses.
