@@ -43,13 +43,13 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 
 ### Generating an outline
 
-1. Upload a PDF and use the page selector to read the original document. Expand **Extracted text** to see which text is available for the outline. The preview works offline.
+1. Upload a PDF in the sidebar. Use the up/down arrows or the page selector beneath the PDF to navigate the original document. **Extracted text** below the reading area follows the selected page. The preview works offline.
 2. Click **Generate outline**. Short documents use one model request. Longer documents are processed in batches; topics with matching titles are combined in page order. Blank, image-only, or unreadable pages are skipped.
-3. Select a page reference under a topic to check its summary against the original PDF page. Switching pages reuses the outline. Removing or replacing the PDF clears it.
+3. The outline appears to the right of the PDF. Select a page reference under a topic to check its summary against the original page. Switching pages reuses the outline. Removing or replacing the PDF clears it.
 
 ### Scheduling the outline
 
-1. Under **Daily study plan**, enter the **Target duration (days)** and select **Create study plan**. The first submission runs a two-step Plan-and-Solve workflow with OpenAI. The planning request uses the full outline to group or split topics into ordered learning units. The second request follows that plan to write a learning objective and a study task for each unit. The app checks topic coverage and takes the page references from the outline.
+1. In the sidebar, enter the **Target duration (days)** and select **Create study plan**. The plan appears beside the PDF, and the outline moves below both, above the extracted text. Each panel scrolls independently. The first submission runs a two-step Plan-and-Solve workflow with OpenAI. The planning request uses the full outline to group or split topics into ordered learning units. The second request follows that plan to write a learning objective and a study task for each unit. The app checks topic coverage and takes the page references from the outline.
 2. Choose a **Study day** to see its learning content and open the cited pages. A short plan groups complete units together. A longer plan can put the reading on one or more days and the unit's study task on the next. Any days left after all readings and tasks are marked for optional review.
 3. To adjust the pace, change the duration and submit again. Python redistributes the same units locally. The plan stays available while browsing the PDF in the current session and clears when the PDF changes.
 

@@ -4,16 +4,16 @@ from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
-from tests.test_outline_ui import button, upload
-from tests.test_pdf_preview import APP, previewed_pdf
+from tests.test_outline_ui import upload
+from tests.test_pdf_preview import APP, button, previewed_pdf
 from tutor.llm import LLMError
 from tutor.materials.outline import Outline, Topic
 from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
 
 
 def create_plan(app, days):
-    app.number_input(key="study_target_days").set_value(days)
-    button(app, "Create study plan").click().run()
+    app.sidebar.number_input(key="study_target_days").set_value(days)
+    button(app.sidebar, "Create study plan").click().run()
 
 
 def visible_text(app):
@@ -21,6 +21,13 @@ def visible_text(app):
         item.value
         for group in (app.subheader, app.text, app.caption, app.html, app.markdown, app.info)
         for item in group
+    )
+
+
+def document_row(app):
+    return next(
+        block for block in app.main.children.values()
+        if block.type == "flex_container" and block.get("component_instance")
     )
 
 
@@ -41,6 +48,39 @@ class PlanningUITests(unittest.TestCase):
         self.model = self.enterContext(patch("tutor.planning.units.generate_structured"))
         self.model.side_effect = [self.plan, self.solution]
         self.app = AppTest.from_file(APP).run()
+
+    @patch("tutor.materials.outline.generate_outline")
+    def test_outline_moves_below_the_reading_row_when_plan_is_created(self, generate):
+        app = self.app
+        generate.return_value = self.outline
+        document = upload(app, "Variable updates", "Loop tracing")
+        button(app.sidebar, "Generate outline").click().run()
+        left, right = document_row(app).children.values()
+        self.assertEqual(previewed_pdf(left), (document, [1]))
+        self.assertIn("Update a variable", visible_text(right.container("outline_panel")))
+        self.assertFalse(document_row(app).code)
+        self.assertEqual(app.main.container("extracted_text_panel").code[0].value.strip(), "Variable updates")
+
+        create_plan(app, 2)
+        left, right = document_row(app).children.values()
+        self.assertEqual(previewed_pdf(left), (document, [1]))
+        self.assertIn("Read an assignment", visible_text(right.container("plan_panel")))
+        self.assertNotIn("outline_panel", [block.key for block in document_row(app).container])
+        self.assertFalse(document_row(app).code)
+        panels = [
+            block for block in app.main.container
+            if block.key in {"plan_panel", "outline_panel", "extracted_text_panel"}
+        ]
+        self.assertEqual([p.key for p in panels], ["plan_panel", "outline_panel", "extracted_text_panel"])
+        self.assertTrue(all(p.proto.height_config.pixel_height > 0 for p in panels))
+
+        button(app.main.container("outline_panel"), "Page 2").click().run()
+        self.assertEqual(previewed_pdf(app), (document, [2]))
+        self.assertEqual(app.main.container("extracted_text_panel").code[0].value.strip(), "Loop tracing")
+        self.assertEqual(app.number_input(key="study_day").value, 1)
+        generate.assert_called_once()
+        self.assertEqual(self.model.call_count, 2)
+        self.assertFalse(app.exception)
 
     @patch("tutor.materials.outline.generate_outline")
     def test_reschedule_and_follow_a_planned_reading(self, generate):

@@ -2,12 +2,12 @@ from collections.abc import Sequence
 from html import escape
 
 import streamlit as st
-from streamlit_pdf_viewer import pdf_viewer
 
 import tutor.planning as planning
 from tutor.llm import LLMError
 from tutor.materials import outline
 from tutor.materials.ingest import PdfInputError, PdfPage, read_pdf_pages
+from tutor.materials.reader import READER_PANEL_HEIGHT, render_extracted_text, render_pdf_preview, show_page
 
 
 def reset_preview() -> None:
@@ -16,10 +16,6 @@ def reset_preview() -> None:
         "study_plan", "study_target_days", "planned_days", "study_day",
     ):
         st.session_state.pop(key, None)
-
-
-def show_page(number: int) -> None:
-    st.session_state.pdf_page_number = number
 
 
 def render_sources(source_ids: Sequence[str], key_prefix: str) -> None:
@@ -34,20 +30,19 @@ def render_sources(source_ids: Sequence[str], key_prefix: str) -> None:
             )
 
 
-def render_study_plan(result: outline.Outline) -> None:
-    st.header("Daily study plan")
+def render_plan_controls(result: outline.Outline) -> None:
     # Retire schedules from sessions opened before model-planned units were introduced.
     if "study_units" in st.session_state and "unit_plan" not in st.session_state:
         for key in ("study_units", "study_plan", "planned_days", "study_day"):
             st.session_state.pop(key, None)
-    if "study_units" not in st.session_state:
-        st.caption("OpenAI uses the outline to organize topics into learning units and prepare a study task for each.")
     with st.form("study_duration"):
         target_days = st.number_input(
             "Target duration (days)", min_value=1, value=7, step=1, key="study_target_days",
             help="Choose how many days to spend on the full outline.",
         )
-        create_plan = st.form_submit_button("Create study plan")
+        create_plan = st.form_submit_button(
+            "Create study plan", help="OpenAI prepares the study tasks once. Changing the duration reuses them."
+        )
 
     if create_plan:
         try:
@@ -65,9 +60,9 @@ def render_study_plan(result: outline.Outline) -> None:
             st.session_state.planned_days = target_days
             st.session_state.study_day = 1
 
-    planned_days = st.session_state.get("planned_days")
-    if planned_days is None:
-        return
+
+def render_study_plan() -> None:
+    planned_days = st.session_state.planned_days
     units = st.session_state.study_units
     days = st.session_state.get("study_plan")
     # An open session can still hold a schedule made by the previous version.
@@ -97,35 +92,65 @@ def render_study_plan(result: outline.Outline) -> None:
         render_sources(assignment.source_ids, f"plan_citation_{number}_{unit.unit_id}")
 
 
-def render_outline(pages: list[PdfPage]) -> None:
-    st.header("Study outline")
+def prepare_outline(pages: list[PdfPage]) -> outline.Outline | None:
     result = st.session_state.get("study_outline")
-    if result is None:
-        readable_count = sum(1 for page in pages if not page.error and page.text.strip())
+    if result is not None:
+        return result
+    readable_count = sum(1 for page in pages if not page.error and page.text.strip())
+    controls = st.empty()
+    with controls.container():
         st.caption("Generate an outline from this PDF’s readable text using OpenAI.")
         if readable_count < len(pages):
             st.caption(f"Pages with readable text: {readable_count} of {len(pages)}.")
         if not st.button("Generate outline", type="primary", disabled=readable_count == 0):
-            return
-        try:
-            with st.spinner("Generating study outline…"):
-                result = outline.generate_outline(pages)
-        except (LLMError, outline.OutlineError) as error:
-            st.error(str(error))
-            return
-        st.session_state.study_outline = result
+            return None
+    try:
+        with st.spinner("Generating study outline…"):
+            result = outline.generate_outline(pages)
+    except (LLMError, outline.OutlineError) as error:
+        st.error(str(error))
+        return None
+    st.session_state.study_outline = result
+    controls.empty()
+    return result
 
-    for index, topic in enumerate(result.topics):
-        st.html(f"<h3>{escape(topic.title)}</h3><p>{escape(topic.summary)}</p>")
-        render_sources(topic.source_ids, f"citation_{index}")
-    render_study_plan(result)
+
+def render_outline(result: outline.Outline | None, height: int) -> None:
+    st.header("Study outline")
+    with st.container(height=height, border=True, key="outline_panel"):
+        if result is None:
+            st.caption("Select Generate outline in the sidebar to see the topics and their source pages.")
+            return
+        for index, topic in enumerate(result.topics):
+            st.html(f"<h3>{escape(topic.title)}</h3><p>{escape(topic.summary)}</p>")
+            render_sources(topic.source_ids, f"citation_{index}")
 
 
 def main() -> None:
     st.set_page_config(page_title="Study materials · Adaptive Tutor", layout="wide")
+    st.html("""
+        <style>
+        [data-testid="stMainBlockContainer"] {
+            padding-inline: clamp(0.75rem, 2vw, 1.5rem);
+            padding-top: 4rem;
+        }
+        /* Keep the arrow buttons' text labels accessible to screen readers. */
+        .st-key-pdf_page_controls button [data-testid="stMarkdownContainer"] {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            clip-path: inset(50%);
+            white-space: nowrap;
+        }
+        </style>
+    """)
     st.title("Study materials")
-    upload = st.file_uploader("Upload a PDF", type=["pdf"], on_change=reset_preview)
+    with st.sidebar:
+        st.header("Study setup")
+        upload = st.file_uploader("Upload a PDF", type=["pdf"], on_change=reset_preview)
     if upload is None:
+        st.info("Upload a PDF in the sidebar to begin.")
         return
 
     if "pdf_pages" not in st.session_state:
@@ -137,28 +162,25 @@ def main() -> None:
             return
 
     pages = st.session_state.pdf_pages
-    preview_column, outline_column = st.columns(2, gap="large")
+    with st.sidebar:
+        result = prepare_outline(pages)
+        if result is not None:
+            render_plan_controls(result)
+
+    has_plan = st.session_state.get("planned_days") is not None
+    preview_column, learning_column = st.columns(2, gap=12)
     with preview_column:
-        st.header("PDF preview")
-        page_number = st.selectbox("Page", range(1, len(pages) + 1), key="pdf_page_number")
-        page = pages[page_number - 1]
-        st.text(f"{upload.name} · Page {page.number} of {len(pages)}")
-        pdf_viewer(
-            upload.getvalue(),
-            pages_to_render=[page.number],
-            render_text=True,
-            height=650,
-            key=f"original_pdf_{upload.file_id}_{page.number}",
-        )
-        with st.expander("Extracted text"):
-            if page.error:
-                st.warning(page.error)
-            elif page.text.strip():
-                st.code(page.text, language=None)
-            else:
-                st.info("No selectable text on this page. It may be blank or scanned. Scanned pages need OCR.")
-    with outline_column:
-        render_outline(pages)
+        page = render_pdf_preview(upload, pages)
+    with learning_column:
+        if has_plan:
+            st.header("Daily study plan")
+            with st.container(height=READER_PANEL_HEIGHT, border=True, key="plan_panel"):
+                render_study_plan()
+        else:
+            render_outline(result, READER_PANEL_HEIGHT)
+    if has_plan:
+        render_outline(result, 320)
+    render_extracted_text(page)
 
 
 if __name__ == "__main__":

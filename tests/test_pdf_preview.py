@@ -20,6 +20,10 @@ def previewed_pdf(app: AppTest) -> tuple[bytes, list[int]]:
     return base64.b64decode(payload["binary"]), payload["pages_to_render"]
 
 
+def button(app, label):
+    return next(widget for widget in app.button if widget.label == label)
+
+
 def make_pdf(*pages: str, password: str | None = None) -> bytes:
     """Build pages with positioned text, as in a PDF containing code samples."""
     writer = PdfWriter()
@@ -67,18 +71,27 @@ class PdfPreviewTests(unittest.TestCase):
 
     def test_navigation_and_upload_replacement(self):
         app = AppTest.from_file(str(APP)).run()
+        self.assertEqual(app.sidebar.file_uploader[0].label, "Upload a PDF")
+        self.assertFalse(app.main.file_uploader)
         first = make_pdf("First page", "", "Third page")
-        app.file_uploader[0].set_value(("lecture.pdf", first, "application/pdf")).run()
+        app.sidebar.file_uploader[0].set_value(("lecture.pdf", first, "application/pdf")).run()
         self.assertEqual(previewed_pdf(app), (first, [1]))
-        self.assertFalse(app.expander[0].proto.expanded)
-        self.assertEqual(app.code[0].value.strip(), "First page")
-        app.selectbox[0].select(2).run()
+        text_panel = app.main.container("extracted_text_panel")
+        self.assertGreater(text_panel.proto.height_config.pixel_height, 0)
+        self.assertFalse(any(expander.code for expander in app.main.expander))
+        self.assertEqual(text_panel.code[0].value.strip(), "First page")
+        self.assertTrue(button(app.main, "Previous page").disabled)
+        button(app.main, "Next page").click().run()
         self.assertEqual(previewed_pdf(app), (first, [2]))
-        self.assertTrue(app.info)
-        self.assertFalse(app.code)
-        app.selectbox[0].select(3).run()
+        self.assertEqual(app.selectbox(key="pdf_page_number").value, 2)
+        self.assertTrue(app.main.container("extracted_text_panel").info)
+        self.assertFalse(app.main.container("extracted_text_panel").code)
+        app.selectbox(key="pdf_page_number").select(3).run()
         self.assertEqual(previewed_pdf(app), (first, [3]))
         self.assertEqual(app.code[0].value.strip(), "Third page")
+        self.assertTrue(button(app.main, "Next page").disabled)
+        button(app.main, "Previous page").click().run()
+        self.assertEqual(previewed_pdf(app), (first, [2]))
 
         replacement = make_pdf("Replacement", "Next", "End")
         app.file_uploader[0].set_value(("lecture.pdf", replacement, "application/pdf")).run()

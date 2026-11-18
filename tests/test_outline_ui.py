@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
-from tests.test_pdf_preview import APP, make_pdf, previewed_pdf
+from tests.test_pdf_preview import APP, button, make_pdf, previewed_pdf
 from tutor.llm import LLMError
 from tutor.materials.outline import Outline, Topic
 
@@ -13,10 +13,6 @@ def upload(app, *pages):
     document = make_pdf(*pages)
     app.file_uploader[0].set_value(("lesson.pdf", document, "application/pdf")).run()
     return document
-
-
-def button(app, label):
-    return next(widget for widget in app.button if widget.label == label)
 
 
 class OutlineUITests(unittest.TestCase):
@@ -35,10 +31,11 @@ class OutlineUITests(unittest.TestCase):
         self.app.run()
         document = upload(self.app, "Course introduction", "Running totals")
         generate.assert_not_called()
-        button(self.app, "Generate outline").click().run()
+        button(self.app.sidebar, "Generate outline").click().run()
         generate.assert_called_once()
-        self.assertIn(self.topic.title, self.app.html[0].value)
-        self.assertIn(escape(self.topic.summary), self.app.html[0].value)
+        topic_html = self.app.main.container("outline_panel").html[0].value
+        self.assertIn(self.topic.title, topic_html)
+        self.assertIn(escape(self.topic.summary), topic_html)
         button(self.app, "Page 2").click().run()
         self.assertEqual(self.app.selectbox[0].value, 2)
         self.assertEqual(previewed_pdf(self.app), (document, [2]))
