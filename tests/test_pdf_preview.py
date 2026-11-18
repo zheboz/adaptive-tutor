@@ -1,4 +1,6 @@
+import base64
 from io import BytesIO
+import json
 from pathlib import Path
 import unittest
 
@@ -10,6 +12,12 @@ from tutor.materials.ingest import PdfInputError, read_pdf_pages
 
 
 APP = Path(__file__).resolve().parents[1] / "app.py"
+
+
+def previewed_pdf(app: AppTest) -> tuple[bytes, list[int]]:
+    viewer, = app.get("component_instance")
+    payload = json.loads(viewer.proto.json_args)
+    return base64.b64decode(payload["binary"]), payload["pages_to_render"]
 
 
 def make_pdf(*pages: str, password: str | None = None) -> bytes:
@@ -61,20 +69,27 @@ class PdfPreviewTests(unittest.TestCase):
         app = AppTest.from_file(str(APP)).run()
         first = make_pdf("First page", "", "Third page")
         app.file_uploader[0].set_value(("lecture.pdf", first, "application/pdf")).run()
+        self.assertEqual(previewed_pdf(app), (first, [1]))
+        self.assertFalse(app.expander[0].proto.expanded)
         self.assertEqual(app.code[0].value.strip(), "First page")
         app.selectbox[0].select(2).run()
+        self.assertEqual(previewed_pdf(app), (first, [2]))
         self.assertTrue(app.info)
         self.assertFalse(app.code)
         app.selectbox[0].select(3).run()
+        self.assertEqual(previewed_pdf(app), (first, [3]))
         self.assertEqual(app.code[0].value.strip(), "Third page")
 
         replacement = make_pdf("Replacement", "Next", "End")
         app.file_uploader[0].set_value(("lecture.pdf", replacement, "application/pdf")).run()
+        self.assertEqual(previewed_pdf(app), (replacement, [1]))
         self.assertEqual(app.code[0].value.strip(), "Replacement")
         app.file_uploader[0].set_value(("lecture.pdf", b"damaged", "application/pdf")).run()
         self.assertTrue(app.error)
         self.assertFalse(app.code)
+        self.assertFalse(app.get("component_instance"))
         app.file_uploader[0].clear().run()
         self.assertFalse(app.error)
         self.assertFalse(app.selectbox)
+        self.assertFalse(app.get("component_instance"))
         self.assertFalse(app.exception)
