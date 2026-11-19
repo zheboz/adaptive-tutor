@@ -8,8 +8,8 @@ import streamlit as st
 from tutor.agent.qa import QASession, ask, start_qa
 from tutor.assessment import retrieval
 from tutor.llm import LLMError
-from tutor.materials.citations import render_sources
 from tutor.materials.ingest import PdfPage
+from tutor.ui.citations import render_sources
 
 
 def qa_session(pages: Sequence[PdfPage]) -> QASession:

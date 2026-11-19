@@ -7,9 +7,9 @@ import streamlit as st
 from tutor.assessment import questions, retrieval
 from tutor.assessment.questions import Question
 from tutor.llm import LLMError
-from tutor.materials.citations import render_sources
 from tutor.materials.ingest import PdfPage
 from tutor.planning import StudyAssignment
+from tutor.ui.citations import render_sources
 
 
 def practice_key(document_id: str, assignment: StudyAssignment) -> str:
@@ -17,7 +17,7 @@ def practice_key(document_id: str, assignment: StudyAssignment) -> str:
     parts = [document_id, assignment.unit.unit_id, *sorted(set(assignment.source_ids))]
     if assignment.kind == "review":
         # A review day revisits the same pages as the unit's task, with fresh questions.
-        parts.append("review")
+        parts.append(f"review-{assignment.round}")
     return sha256("|".join(parts).encode()).hexdigest()
 
 

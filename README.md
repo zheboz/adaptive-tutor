@@ -74,15 +74,22 @@ After the outline appears, check **I find this weak or unclear** under any topic
 - When the material doesn't cover the question, the tutor says so and names the missing topic instead of answering from general knowledge.
 - It knows today's study units and the topics you marked as weak, and remembers the last few questions for follow-ups. The caption under the chat shows the model calls and tokens used so far.
 
-### Diagnosing a difficulty (command line)
+### Checking your understanding
 
-The diagnosis agent is not in the web app yet. To try it on a PDF, run it in the terminal with the same environment as the app:
+The tutor checks what you know at two points, and adjusts the plan to the answers. In both, it chooses each question from your earlier answers and shows why, and it reports a confirmed gap only after at least two wrong answers on a unit that outnumber the correct ones; otherwise the conclusion stays uncertain. Questions come from your material.
+
+- **Initial check.** After you create the plan, select **Start initial check** (or **Skip**). The tutor asks up to five questions, starting with the topics you marked weak and checking whether an earlier unit is the real cause. Units the answers show to be weak get more of the plan; a marked unit you answer correctly gets no extra time.
+- **Daily check.** After a day's practice, select **Check my understanding**. The tutor reads that day's practice answers and asks up to three more questions about that day's and earlier units. It then continues, adds a review of today's unit after its remaining study days, or adds a review of an earlier unit. A review already planned later is not added twice.
+
+The plan shows your goal, how many days the plan now has, and how many you have checked. When reviews make the plan longer than your goal, it says by how much; you can keep going at your pace or create the plan again with more days. **Plan changes** lists each change and the answers behind it.
+
+To try a diagnosis in the terminal instead, run:
 
 ```bash
 uv run --no-project --env-file .env -- .venv/bin/python -m tutor.agent.cli path/to/lesson.pdf --trace
 ```
 
-The tutor builds the study units, asks which units you find weak, then asks up to five questions from your material. It chooses each question from your earlier answers and shows why. It reports a confirmed gap only after at least two wrong answers on that unit; otherwise its conclusion stays uncertain. `--trace` lists every model call and tool step with its time and tokens.
+`--trace` lists every model call and tool step with its time and tokens.
 
 ## Planned architecture
 

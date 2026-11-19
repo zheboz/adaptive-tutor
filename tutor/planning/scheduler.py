@@ -22,6 +22,8 @@ class StudyAssignment:
     unit: StudyUnit
     kind: Literal["study", "read", "apply", "review"]
     source_ids: tuple[str, ...]
+    # Counts a unit's review sessions from 1, so each review gets its own practice.
+    round: int = 0
 
 
 @dataclass(frozen=True)
@@ -131,5 +133,16 @@ def schedule_units(
                 assignments.append(StudyAssignment(whole.unit, "read", pages))
             assignments.append(StudyAssignment(whole.unit, "apply", whole.source_ids))
         if index in reviews:
-            assignments.append(StudyAssignment(whole.unit, "review", whole.source_ids))
+            assignments.append(StudyAssignment(whole.unit, "review", whole.source_ids, round=1))
     return tuple(StudyDay(number, (task,)) for number, task in enumerate(assignments, start=1))
+
+
+def insert_review(days: Sequence[StudyDay], after_day: int, unit: StudyUnit) -> tuple[StudyDay, ...]:
+    """Add a review day for a unit right after `after_day`; later days move back by one."""
+    if not 0 <= after_day <= len(days):
+        raise ValueError("The review must follow a day in the plan.")
+    rounds = sum(a.unit.unit_id == unit.unit_id and a.kind == "review" for day in days for a in day.assignments)
+    review = StudyAssignment(unit, "review", tuple(dict.fromkeys(unit.source_ids)), round=rounds + 1)
+    ordered = [day.assignments for day in days]
+    ordered.insert(after_day, (review,))
+    return tuple(StudyDay(number, assignments) for number, assignments in enumerate(ordered, start=1))

@@ -57,6 +57,7 @@ class UnitEvidence:
 class LearnerState:
     def __init__(self, units: Sequence[StudyUnit]):
         self.units = {unit.unit_id: UnitEvidence(unit) for unit in units}
+        self.flagged: set[str] = set()
 
     @property
     def unit_ids(self) -> tuple[str, ...]:
@@ -70,6 +71,19 @@ class LearnerState:
         reported = set(unit_ids)
         for unit_id, evidence in self.units.items():
             evidence.self_reported = unit_id in reported
+
+    def flag(self, unit_id: str) -> None:
+        """Remember a unit a check named as the likeliest difficulty, even when it was not confirmed."""
+        if unit_id in self.units:
+            self.flagged.add(unit_id)
+
+    def focus_units(self) -> tuple[str, ...]:
+        """Units that should get extra time: likely gaps, plus reported or flagged units not yet mastered."""
+        return tuple(
+            unit_id for unit_id, evidence in self.units.items()
+            if evidence.status == "gap"
+            or (evidence.status != "mastered" and (evidence.self_reported or unit_id in self.flagged))
+        )
 
     def answered(self, question_id: str) -> bool:
         return any(answer.question_id == question_id for answer in self.answers())
