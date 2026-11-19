@@ -56,10 +56,14 @@ def learner_state(units: Sequence[StudyUnit]) -> LearnerState:
 
 
 def apply_plan_inputs(units: Sequence[StudyUnit]) -> tuple[str, ...]:
-    """Record the weak topics checked when the plan was created; return the weak unit IDs."""
-    weak = weak_unit_ids(units)
-    learner_state(units).apply_report(weak)
-    return weak
+    """Record the weak topics checked when the plan was created; return the units that get extra time.
+
+    Answers count too: a reported unit the learner has since mastered gets no extra time, and a
+    unit the tutor's checks found weak keeps it.
+    """
+    state = learner_state(units)
+    state.apply_report(weak_unit_ids(units))
+    return state.focus_units()
 
 
 def _evidence_text(evidence) -> str:

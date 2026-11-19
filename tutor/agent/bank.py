@@ -1,8 +1,15 @@
-"""Diagnostic questions per study unit, generated from the unit's reading on first use and cached."""
+"""Diagnostic questions per study unit, generated from the unit's reading and cached.
 
-from collections.abc import Collection, Sequence
+Questions are built on first use, or earlier in background threads with ``prefetch`` so a check
+does not wait for each unit in turn.
+"""
+
+from collections.abc import Collection, Iterable, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
+import contextvars
 from dataclasses import dataclass
 import re
+import threading
 import unicodedata
 
 from tutor.assessment import questions, retrieval
@@ -23,6 +30,7 @@ def _identity(question: Question) -> tuple[str, frozenset[str]]:
 
     return normal(_NUMBERING.sub("", question.prompt.strip())), frozenset(map(normal, question.options))
 
+
 @dataclass(frozen=True)
 class DiagnosticQuestion:
     id: str
@@ -38,16 +46,28 @@ class QuestionBank:
         self._pages = pages
         self._index: retrieval.PassageIndex | None = None
         self._questions: dict[str, tuple[DiagnosticQuestion, ...]] = {}
+        self._pending: dict[str, Future] = {}
+        self._executor: ThreadPoolExecutor | None = None
+        self._lock = threading.Lock()
         self.problems: dict[str, str] = {}
 
+    @property
+    def unit_ids(self) -> tuple[str, ...]:
+        return tuple(self._units)
+
+    def _passage_index(self) -> retrieval.PassageIndex:
+        with self._lock:
+            if self._index is None:
+                self._index = retrieval.build_index(self._pages)
+            return self._index
+
     def _build(self, unit_id: str) -> tuple[DiagnosticQuestion, ...]:
-        if self._index is None:
-            self._index = retrieval.build_index(self._pages)
+        index = self._passage_index()
         unit = self._units[unit_id]
         assignment = StudyAssignment(unit, "study", unit.source_ids)
-        passages = retrieval.retrieve(self._index, assignment)
+        passages = retrieval.retrieve(index, assignment)
         scope = set(unit.source_ids)
-        reading = [passage for passage in self._index.passages if passage.source_id in scope]
+        reading = [passage for passage in index.passages if passage.source_id in scope]
         try:
             built = questions.generate_questions(
                 assignment, passages, assigned_reading=reading, questions_wanted=QUESTIONS_PER_UNIT,
@@ -66,12 +86,32 @@ class QuestionBank:
                 distinct.append(question)
         return tuple(DiagnosticQuestion(f"{unit_id}:q{n}", unit_id, q) for n, q in enumerate(distinct, 1))
 
+    def prefetch(self, unit_ids: Iterable[str]) -> None:
+        """Start building questions for these units in the background.
+
+        Model calls made there are recorded in the trace that is active when this is called.
+        """
+        self._passage_index()
+        for unit_id in unit_ids:
+            if unit_id not in self._units or unit_id in self._questions or unit_id in self._pending:
+                continue
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="question-bank")
+            context = contextvars.copy_context()
+            self._pending[unit_id] = self._executor.submit(context.run, self._build, unit_id)
+
+    def _ensure(self, unit_id: str) -> None:
+        if unit_id in self._questions:
+            return
+        future = self._pending.pop(unit_id, None)
+        # A failed request is not cached, so the next pick retries it.
+        self._questions[unit_id] = future.result() if future is not None else self._build(unit_id)
+
     def pick(self, unit_id: str, exclude: Collection[str]) -> DiagnosticQuestion | None:
         """Return an unused question for the unit; model errors propagate to the caller."""
         if unit_id not in self._units:
             return None
-        if unit_id not in self._questions:
-            self._questions[unit_id] = self._build(unit_id)
+        self._ensure(unit_id)
         return next((q for q in self._questions[unit_id] if q.id not in exclude), None)
 
     def remaining(self, unit_id: str, exclude: Collection[str]) -> int | None:
