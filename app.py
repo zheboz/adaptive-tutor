@@ -9,6 +9,7 @@ from tutor.materials import outline
 from tutor.materials.citations import render_sources
 from tutor.materials.ingest import PdfInputError, PdfPage, read_pdf_pages
 from tutor.materials.reader import READER_PANEL_HEIGHT, render_extracted_text, render_pdf_preview
+from tutor.ui import learner
 
 
 def reset_preview() -> None:
@@ -16,6 +17,7 @@ def reset_preview() -> None:
         "pdf_pages", "pdf_page_number", "study_outline", "unit_plan", "study_units",
         "study_plan", "study_target_days", "planned_days", "study_day",
         "practice_index", "practice_sets", "practice_answers", "practice_skips",
+        "learner_state", "learner_intake", "self_report_units", "self_report_note",
     ):
         st.session_state.pop(key, None)
 
@@ -54,6 +56,7 @@ def render_plan_controls(result: outline.Outline) -> None:
 def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
     planned_days = st.session_state.planned_days
     units = st.session_state.study_units
+    learner.learner_state(units)
     days = st.session_state.get("study_plan")
     # An open session can still hold a schedule made by the previous version.
     if not days or not hasattr(days[0], "assignments"):
@@ -83,7 +86,7 @@ def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
             f"<p><strong>{action} · {escape(unit.title)}</strong><br>{escape(unit.objective)}</p>{task}"
         )
         render_sources(assignment.source_ids, f"plan_citation_{number}_{unit.unit_id}")
-        practice_ui.render_questions(scope)
+        practice_ui.render_questions(scope, unit.unit_id)
 
 
 def prepare_outline(pages: list[PdfPage]) -> outline.Outline | None:
@@ -160,6 +163,9 @@ def main() -> None:
         result = prepare_outline(pages)
         if result is not None:
             render_plan_controls(result)
+        has_plan = st.session_state.get("planned_days") is not None
+        if has_plan:
+            learner.render_self_report(st.session_state.study_units)
 
     has_plan = st.session_state.get("planned_days") is not None
     preview_column, learning_column = st.columns([3, 2] if has_plan else 2, gap=12)
@@ -173,6 +179,7 @@ def main() -> None:
         else:
             render_outline(result, READER_PANEL_HEIGHT)
     if has_plan:
+        learner.render_learning_status(st.session_state.study_units, 280)
         render_outline(result, 320)
     render_extracted_text(page)
 
