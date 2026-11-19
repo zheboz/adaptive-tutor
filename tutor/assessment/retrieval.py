@@ -14,6 +14,8 @@ from tutor.planning.scheduler import StudyAssignment
 _CHUNK_SIZE = 1600
 _OVERLAP = 180
 _MAX_PASSAGES = 10
+# Added to the BM25 score of a passage that contains the search query word for word.
+_PHRASE_BONUS = 10.0
 # Split adjacent Latin words and Han sequences even when there are no spaces.
 _TOKEN = re.compile(r"[\u3400-\u9fff]+|(?:(?![\u3400-\u9fff])[^\W_])+")
 _STOP = set("""
@@ -109,6 +111,33 @@ def _bm25(index: PassageIndex, position: int, query: dict[str, float]) -> float:
         weight * index.idf[term] * count * 2.2 / (count + normalization)
         for term, weight in query.items() if (count := terms.get(term, 0))
     )
+
+
+def _flat(text: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
+
+
+def search(index: PassageIndex, query: str, limit: int = 5) -> tuple[Passage, ...]:
+    """Rank every passage against free text, as a tutor's search tool would.
+
+    Words are ranked with BM25. A query that appears verbatim, such as the code fragment
+    ``x = x + 1`` whose single letters and digits are not indexed as words, ranks first.
+    """
+    terms = dict.fromkeys(_terms(query), 1.0)
+    phrase = _flat(query)
+    if len(phrase.replace(" ", "")) < 3:
+        phrase = ""
+    if not terms and not phrase:
+        return ()
+    scored = []
+    for i, passage in enumerate(index.passages):
+        score = _bm25(index, i, terms) if terms else 0.0
+        if phrase and phrase in _flat(passage.text):
+            score += _PHRASE_BONUS
+        if score > 0:
+            scored.append((score, i))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return tuple(index.passages[i] for _, i in scored[:limit])
 
 
 def retrieve(index: PassageIndex, assignment: StudyAssignment) -> tuple[Passage, ...]:

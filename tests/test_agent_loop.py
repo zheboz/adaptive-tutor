@@ -58,7 +58,7 @@ class ScriptedModel:
         self.turns = list(turns)
         self.seen = []
 
-    def __call__(self, *, instructions, items, tools):
+    def __call__(self, *, instructions, items, tools, **_):
         self.seen.append(json.loads(json.dumps(items)))
         if not self.turns:
             raise AssertionError("The model was called more often than scripted.")

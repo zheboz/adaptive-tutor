@@ -68,6 +68,15 @@ After the outline appears, check **I find this weak or unclear** under any topic
 
 **Learning status** shows each unit's status and the evidence behind it. A unit marked weak is only suspected until answers check it; practice answers decide whether it is understood or a likely gap.
 
+### Asking the tutor
+
+**Ask the tutor** appears once the outline is ready. Type a question about the material and the tutor answers from your PDF only (agentic RAG):
+
+- It decides what to search for, tries other wording or reads a page when the first search misses, and uses at most three searches per question. Code fragments such as `x = x + 1` are matched word for word.
+- Every answer quotes the pages it relies on. The app checks that each quote appears on the cited page and that the tutor retrieved that page for this question; select a page link to open it beside the chat.
+- When the material doesn't cover the question, the tutor says so and names the missing topic instead of answering from general knowledge.
+- It knows today's study units and the topics you marked as weak, and remembers the last few questions for follow-ups. The caption under the chat shows the model calls and tokens used so far.
+
 ### Diagnosing a difficulty (command line)
 
 The diagnosis agent is not in the web app yet. To try it on a PDF, run it in the terminal with the same environment as the app:

@@ -9,7 +9,7 @@ from tutor.materials import outline
 from tutor.materials.citations import render_sources
 from tutor.materials.ingest import PdfInputError, PdfPage, read_pdf_pages
 from tutor.materials.reader import READER_PANEL_HEIGHT, render_extracted_text, render_pdf_preview
-from tutor.ui import learner
+from tutor.ui import learner, tutor_chat
 
 
 def reset_preview() -> None:
@@ -97,6 +97,23 @@ def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
         )
         render_sources(assignment.source_ids, f"plan_citation_{number}_{unit.unit_id}")
         practice_ui.render_questions(scope, unit.unit_id)
+
+
+def tutor_context(result: outline.Outline) -> dict:
+    """What the tutor should know about the learner when answering a question."""
+    context: dict = {"weak_topics": [
+        result.topics[number - 1].title for number in sorted(learner.weak_topic_numbers())
+        if number <= len(result.topics)
+    ]}
+    days = st.session_state.get("study_plan")
+    number = st.session_state.get("study_day")
+    if days and number and number <= len(days):
+        context["study_day"] = number
+        context["todays_units"] = [
+            {"title": a.unit.title, "objective": a.unit.objective, "pages": list(a.source_ids)}
+            for a in days[number - 1].assignments
+        ]
+    return context
 
 
 def prepare_outline(pages: list[PdfPage]) -> outline.Outline | None:
@@ -187,6 +204,8 @@ def main() -> None:
                 render_study_plan(pages, upload.file_id)
         else:
             render_outline(result, READER_PANEL_HEIGHT)
+    if result is not None:
+        tutor_chat.render_tutor_chat(pages, tutor_context(result), 360)
     if has_plan:
         learner.render_learning_status(st.session_state.study_units, 280)
         render_outline(result, 320)
