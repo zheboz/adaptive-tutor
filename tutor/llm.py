@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 import json
+import logging
 import os
 import time
 from typing import Any, TypeVar
@@ -22,6 +23,8 @@ from pydantic import BaseModel, ValidationError
 
 T = TypeVar("T", bound=BaseModel)
 DEFAULT_MODEL = "gpt-4.1-mini"
+# Details of failed requests go to the server log (the terminal running the app), never to the page.
+logger = logging.getLogger(__name__)
 
 
 class LLMError(RuntimeError):
@@ -108,6 +111,7 @@ def _request(name: str, send: Callable[[OpenAI, str], Any]) -> Any:
         error = _safe_error(exc)
         if error is None:
             raise
+        logger.warning("OpenAI request %s failed: %s: %s", name, type(exc).__name__, exc)
         record_span(Span(name, time.perf_counter() - start, error=str(error)))
         raise error from None
     usage = getattr(response, "usage", None)

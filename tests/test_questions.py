@@ -83,16 +83,27 @@ class PracticeQuestionTests(unittest.TestCase):
         self.assertEqual(self.generate.call_count, 2)
         self.assertIn("correction", json.loads(self.generate.call_args.kwargs["content"]))
 
-    def test_original_claim_requires_full_printed_question(self):
+    def test_unverifiable_original_claims_become_generated_questions(self):
+        # Slides often print no exercise: a draft that claims one but rests on a verified learning
+        # point is kept, labeled as generated, with the reading as its only source.
         for change in (
-            {"prompt":"Which value is stored?", "answer_key":None}, {"options":["1", "2"]},
-            {"options":["1", "2", "13"]}, {"exercise":[]},
-            {"options":["1", "2"], "exercise":[
+            {"prompt": "Which value is stored?", "answer_key": None}, {"options": ["1", "2"]},
+            {"options": ["1", "2", "13"]}, {"exercise": []},
+            {"options": ["1", "2"], "exercise": [
                 Evidence(passage_id="p8-c2", quote=self.exercise.rsplit(" C.", 1)[0]),
             ]},
+            {"exercise": [Evidence(passage_id="p8-c2", quote="An invented exercise. A. 1 B. 2")]},
+            {"answer_key": Evidence(passage_id="p8-c2", quote="Answer: invented.")},
         ):
-            with self.subTest(change=change), self.assertRaises(PracticeError):
-                self.batch(self.original.model_copy(update=change), generate=_model_questions)
+            with self.subTest(change=change):
+                result, = self.batch(self.original.model_copy(update=change), generate=_model_questions)
+                self.assertEqual((result.origin, result.answer_origin), ("generated", "reference"))
+                self.assertEqual(result.source_ids, ("p1",))
+                self.assertEqual((result.evidence, result.evidence_source_id), (self.fact, "p1"))
+        # Without a learning point there is nothing left to stand on.
+        with self.assertRaises(PracticeError):
+            self.batch(self.original.model_copy(update={"options": ["1", "2", "13"], "concept_id": None}),
+                       generate=_model_questions)
 
     def test_bounded_validation_for_counts_choices_and_quotes(self):
         invalid = (
@@ -121,7 +132,7 @@ class PracticeQuestionTests(unittest.TestCase):
         self.generate.assert_called_once()
 
     def test_retains_verified_items_after_repeated_bad_sibling_or_failed_repair(self):
-        bad = self.original.model_copy(update={"options": ["1", "2", "13"]})
+        bad = self.original.model_copy(update={"options": ["1", "2", "13"], "concept_id": None})
         for retry in (QuestionBatch(questions=[bad]), LLMError("Request failed.")):
             with self.subTest(retry=retry):
                 self.generate.side_effect = [QuestionBatch(questions=[bad, self.generated]), retry]

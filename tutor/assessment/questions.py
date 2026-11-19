@@ -40,6 +40,10 @@ class PracticeError(ValueError):
     """The retrieved material or question set could not support this practice."""
 
 
+class _AttributionError(PracticeError):
+    """A draft's claim to reuse a printed exercise or answer key could not be verified."""
+
+
 class InsufficientEvidence(PracticeError):
     """No assessable point or identifiable exercise was found in the assigned reading."""
 
@@ -171,7 +175,10 @@ def _printed_key_matches(draft: QuestionDraft, passages: dict[str, Passage], opt
     key = draft.answer_key
     if key is None:
         return False
-    quote = _verified_excerpt(key, passages)
+    try:
+        quote = _verified_excerpt(key, passages)
+    except PracticeError as error:
+        raise _AttributionError(str(error)) from None
     if draft.origin != "pdf":
         return False
     marker = _ANSWER_MARKER.search(quote)
@@ -220,6 +227,19 @@ def _grounding(draft: QuestionDraft, passages: dict[str, Passage], scope: set[st
 
 def _check_question(draft: QuestionDraft, passages: dict[str, Passage], scope: set[str],
                     concepts: dict[str, Concept]) -> Question:
+    """Verify a draft. A question resting on a verified learning point is kept as a generated
+    question when only its claim to be a printed exercise fails, as with slides that print none."""
+    try:
+        return _check_draft(draft, passages, scope, concepts)
+    except _AttributionError:
+        if draft.concept_id is None or draft.origin == "generated":
+            raise
+        plain = draft.model_copy(update={"origin": "generated", "exercise": [], "answer_key": None})
+        return _check_draft(plain, passages, scope, concepts)
+
+
+def _check_draft(draft: QuestionDraft, passages: dict[str, Passage], scope: set[str],
+                 concepts: dict[str, Concept]) -> Question:
     prompt, explanation = draft.prompt.strip(), draft.explanation.strip()
     options = tuple(option.strip() for option in draft.options)
     labels = {_normalized(option).casefold() for option in options}
@@ -234,18 +254,21 @@ def _check_question(draft: QuestionDraft, passages: dict[str, Passage], scope: s
     if passages[grounding.passage_id].source_id not in scope:
         raise PracticeError("A question needs supporting evidence from the assigned reading.")
 
-    excerpts = [_verified_excerpt(ref, passages) for ref in draft.exercise]
+    try:
+        excerpts = [_verified_excerpt(ref, passages) for ref in draft.exercise]
+    except PracticeError as error:
+        raise _AttributionError(str(error)) from None
     exercise_text = " ".join(excerpts)
     if draft.origin == "generated" and excerpts:
-        raise PracticeError("The exercise attribution conflicts with the question's origin.")
+        raise _AttributionError("The exercise attribution conflicts with the question's origin.")
     if draft.origin != "generated" and not _EXERCISE_MARKER.search(exercise_text):
-        raise PracticeError("A textbook question needs a quotation of an identifiable PDF exercise.")
+        raise _AttributionError("A textbook question needs a quotation of an identifiable PDF exercise.")
     printed_answer = _printed_key_matches(draft, passages, options)
     if draft.origin == "pdf" and not _original_matches(draft, options, exercise_text, passages):
         raw_exercise = "\n".join(ref.quote for ref in draft.exercise)
         stem = recover_printed_stem(raw_exercise, draft.kind, options) if printed_answer else None
         if not stem or not _original_matches(draft.model_copy(update={"prompt": stem}), options, exercise_text, passages):
-            raise PracticeError("The original question or its choices do not match the quoted PDF exercise.")
+            raise _AttributionError("The original question or its choices do not match the quoted PDF exercise.")
         prompt = stem
         # The draft explained its own wording. Use the verified reading for the restored exercise.
         if draft.concept_id is not None:
