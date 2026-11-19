@@ -1,10 +1,11 @@
 import streamlit as st
 
 import tutor.planning as planning
+from tutor import llm
 from tutor.llm import LLMError
 from tutor.materials import outline
 from tutor.materials.ingest import PdfInputError, PdfPage, read_pdf_pages
-from tutor.ui import check, learner, navigation, quiz, tutor_chat, views
+from tutor.ui import check, learner, navigation, quiz, settings, tutor_chat, views
 from tutor.ui.reader import READER_PANEL_HEIGHT, render_extracted_text, render_pdf_preview
 
 
@@ -185,7 +186,15 @@ def main() -> None:
     st.title("Study materials")
     with st.sidebar:
         st.header("Study setup")
+        api_key, model = settings.render_settings()
         upload = st.file_uploader("Upload a PDF", type=["pdf"], on_change=reset_preview)
+    # Every model call in this run, including those in background threads, uses this session's
+    # key and model (or the app's when the learner gave none).
+    with llm.using(api_key, model):
+        render_study(upload)
+
+
+def render_study(upload) -> None:
     if upload is None:
         views.render_steps(1, "upload a PDF in the sidebar.")
         st.info("Upload a PDF in the sidebar to begin.")

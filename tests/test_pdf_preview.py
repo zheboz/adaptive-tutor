@@ -105,6 +105,6 @@ class PdfPreviewTests(unittest.TestCase):
         self.assertFalse(app.get("component_instance"))
         app.file_uploader[0].clear().run()
         self.assertFalse(app.error)
-        self.assertFalse(app.selectbox)
+        self.assertFalse(app.main.selectbox)
         self.assertFalse(app.get("component_instance"))
         self.assertFalse(app.exception)
