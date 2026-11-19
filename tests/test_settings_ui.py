@@ -37,6 +37,7 @@ class SettingsUITests(unittest.TestCase):
         self.models.assert_called_once_with("sk-learner")
         model = self.app.sidebar.selectbox(key="model_choice")
         self.assertEqual(model.options, ["gpt-4.1-mini", "gpt-5.6-luna", "gpt-6-luna", "o3", "Other…"])
+        self.assertEqual(model.value, "gpt-4.1-mini")
         self.assertIn("Using your key.", [c.value for c in self.app.sidebar.caption])
         model.set_value("gpt-6-luna").run()
         self.app.run()
@@ -73,13 +74,19 @@ class SettingsUITests(unittest.TestCase):
         self.assertIn("rejected the credentials", self.app.sidebar.error[0].value)
         self.assertEqual(self.app.sidebar.selectbox(key="model_choice").options[0], "gpt-4.1-mini")
 
-    def test_the_apps_own_key_is_used_but_never_shown(self):
-        self.env["OPENAI_API_KEY"] = "sk-app-secret"
+    def test_a_server_key_is_never_used_or_shown(self):
+        self.env["OPENAI_API_KEY"] = "sk-server-secret"
+        self.env["OPENAI_MODEL"] = "server-model"
         self.app = AppTest.from_file(APP).run()
         self.assertEqual(self.key_input().value, "")
-        self.assertFalse(self.app.sidebar.expander[0].proto.expanded)
-        self.assertIn("Using the app's key. Enter your own to use your account.",
+        self.assertTrue(self.app.sidebar.expander[0].proto.expanded)
+        self.assertIn("Enter your key to generate outlines, quizzes and answers.",
                       [c.value for c in self.app.sidebar.caption])
+        self.assertEqual(self.app.sidebar.selectbox(key="model_choice").value, "gpt-4.1-mini")
         self.models.assert_not_called()
-        button(self.app.sidebar, "Load models for the app's key").click().run()
-        self.models.assert_called_once_with(None)
+        # Without the learner's key, generating an outline asks for it.
+        with patch("tutor.llm.OpenAI") as sdk:
+            upload(self.app, "Loops: range(3).")
+            button(self.app.sidebar, "Generate outline").click().run()
+        self.assertIn("Enter your OpenAI API key in the sidebar", self.app.sidebar.error[0].value)
+        sdk.assert_not_called()

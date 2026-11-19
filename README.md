@@ -27,19 +27,13 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-The outline, planning, quiz, check and tutor features use the OpenAI SDK. Each learner can enter their own key in the sidebar; if the server has `OPENAI_API_KEY` set, it is used when a learner leaves the field empty. Start the app from the project root:
+The outline, planning, quiz, check and tutor features call OpenAI with the key each learner enters in the sidebar; the app has no key of its own. Start the app from the project root:
 
 ```bash
-python -m streamlit run app.py
+.venv/bin/python -m streamlit run app.py
 ```
 
-If your key is in a local `.env` file, you can use `uv` to supply it to the same app at launch:
-
-```bash
-uv run --no-project --env-file .env -- .venv/bin/python -m streamlit run app.py
-```
-
-The default model is `gpt-4.1-mini`. To choose another model that supports structured outputs, set `OPENAI_MODEL` in the server environment.
+Then open the app, enter your OpenAI API key under **OpenAI settings**, and choose a model (the default is `gpt-4.1-mini`).
 
 ### Your OpenAI key and model
 
@@ -47,7 +41,7 @@ Open **OpenAI settings** at the top of the sidebar and enter your OpenAI API key
 
 Once your key is entered, **Model** lists the chat models your account can use (for example `gpt-5.6-luna` or `gpt-6-luna`); **Other…** accepts any model ID. The default is `gpt-4.1-mini`. The tutor needs a model that supports tool calls and structured outputs; if one fails, switch back to the default. Your key and model apply to everything in your session: the outline, the plan, the quiz, the daily checks and Ask the tutor.
 
-If the app was started with `OPENAI_API_KEY`, you can leave the field empty to use the app's key, which is never displayed.
+The app never uses a key from the server's environment: without your key, nothing is sent to OpenAI.
 
 ### Page layout
 

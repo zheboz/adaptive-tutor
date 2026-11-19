@@ -1,13 +1,15 @@
 """Run one diagnosis in the terminal: python -m tutor.agent.cli lesson.pdf
 
-This uses the same outline, units, question pipeline and agent loop as the web app.
+This uses the same outline, units, question pipeline and agent loop as the web app. The web app
+takes the key from each learner; this developer tool reads OPENAI_API_KEY from its own environment.
 """
 
 import argparse
+import os
 from pathlib import Path
 import sys
 
-from tutor.llm import LLMError, Trace, tracing
+from tutor.llm import DEFAULT_MODEL, LLMError, Trace, tracing, using
 from tutor.materials import outline
 from tutor.materials.ingest import PdfInputError, read_pdf_pages
 from tutor.planning import build_study_units, plan_units
@@ -34,7 +36,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Diagnose a learner's main difficulty in a PDF's material.")
     parser.add_argument("pdf", type=Path)
     parser.add_argument("--trace", action="store_true", help="Print every model and tool step at the end.")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"OpenAI model ID (default {DEFAULT_MODEL}).")
     args = parser.parse_args(argv)
+    if not os.environ.get("OPENAI_API_KEY"):
+        print("Set OPENAI_API_KEY to run the command-line diagnosis.", file=sys.stderr)
+        return 1
+    with using(os.environ["OPENAI_API_KEY"], args.model):
+        return _run(args)
+
+
+def _run(args: argparse.Namespace) -> int:
 
     try:
         pages = read_pdf_pages(args.pdf.read_bytes())

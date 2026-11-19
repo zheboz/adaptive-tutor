@@ -6,7 +6,6 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 import json
 import logging
-import os
 import re
 import time
 from typing import Any, TypeVar
@@ -68,14 +67,14 @@ _active_trace: ContextVar[Trace | None] = ContextVar("active_trace", default=Non
 
 @dataclass(frozen=True)
 class Credentials:
-    """A learner's own key and model for this session. Empty fields fall back to the app's environment."""
+    """The learner's own key and model for this session. The app has no key of its own."""
 
     api_key: str | None = None
     model: str | None = None
 
 
-# Per-session credentials. They are never written to the process environment, which every session
-# of the app shares; background threads that copy the context see them too.
+# Per-session credentials, entered by the learner. They are never read from or written to the process
+# environment, which every session of the app shares; background threads that copy the context see them.
 _active_credentials: ContextVar[Credentials] = ContextVar("active_credentials", default=Credentials())
 
 
@@ -91,11 +90,11 @@ def using(api_key: str | None = None, model: str | None = None) -> Iterator[Cred
 
 
 def current_model() -> str:
-    return _active_credentials.get().model or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
+    return _active_credentials.get().model or DEFAULT_MODEL
 
 
 def _api_key() -> str | None:
-    return _active_credentials.get().api_key or os.environ.get("OPENAI_API_KEY") or None
+    return _active_credentials.get().api_key
 
 
 def _client(api_key: str) -> OpenAI:
@@ -136,10 +135,10 @@ def _safe_error(exc: Exception) -> LLMError | None:
 
 
 def _request(name: str, send: Callable[[OpenAI, str], Any]) -> Any:
-    """Send one request with this session's credentials, or the app's, and record its span."""
+    """Send one request with this session's key and model, and record its span."""
     api_key = _api_key()
     if not api_key:
-        raise LLMError("Enter your OpenAI API key in the sidebar, or set OPENAI_API_KEY for the app.")
+        raise LLMError("Enter your OpenAI API key in the sidebar to use the tutor.")
     model = current_model()
     start = time.perf_counter()
     try:
@@ -239,7 +238,7 @@ def list_models(api_key: str | None = None) -> list[str]:
     """Chat model IDs the key can use, for a model picker. Errors are safe to show."""
     api_key = api_key or _api_key()
     if not api_key:
-        raise LLMError("Enter your OpenAI API key in the sidebar, or set OPENAI_API_KEY for the app.")
+        raise LLMError("Enter your OpenAI API key in the sidebar to use the tutor.")
     try:
         with _client(api_key) as client:
             ids = [model.id for model in client.models.list()]
