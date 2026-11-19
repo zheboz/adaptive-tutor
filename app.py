@@ -17,9 +17,10 @@ def reset_preview() -> None:
         "pdf_pages", "pdf_page_number", "study_outline", "unit_plan", "study_units",
         "study_plan", "study_target_days", "planned_days", "study_day",
         "practice_index", "practice_sets", "practice_answers", "practice_skips",
-        "learner_state", "learner_intake", "self_report_units", "self_report_note",
+        "learner_state", "learner_intake", learner.NOTE_KEY, "planned_weak", "qa_session",
     ):
         st.session_state.pop(key, None)
+    learner.clear_weak_topics()
 
 
 def render_plan_controls(result: outline.Outline) -> None:
@@ -32,6 +33,8 @@ def render_plan_controls(result: outline.Outline) -> None:
             "Target duration (days)", min_value=1, value=7, step=1, key="study_target_days",
             help="Choose how many days to spend on the full outline.",
         )
+        st.caption("Topics you check as weak in the outline get more of the time.")
+        learner.render_note_input()
         create_plan = st.form_submit_button(
             "Create study plan", help="OpenAI prepares the study tasks once. Changing the duration reuses them."
         )
@@ -47,10 +50,14 @@ def render_plan_controls(result: outline.Outline) -> None:
         except (LLMError, planning.PlanningError) as error:
             st.error(str(error))
             return
-        if st.session_state.get("planned_days") != target_days:
+        weak = learner.apply_plan_inputs(st.session_state.study_units)
+        if st.session_state.get("planned_days") != target_days or st.session_state.get("planned_weak") != weak:
             st.session_state.pop("study_plan", None)
             st.session_state.planned_days = target_days
+            st.session_state.planned_weak = weak
             st.session_state.study_day = 1
+    if "study_units" in st.session_state:
+        learner.render_intake_feedback(st.session_state.study_units)
 
 
 def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
@@ -60,9 +67,12 @@ def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
     days = st.session_state.get("study_plan")
     # An open session can still hold a schedule made by the previous version.
     if not days or not hasattr(days[0], "assignments"):
-        days = planning.schedule_units(units, planned_days)
+        days = planning.schedule_units(units, planned_days, st.session_state.get("planned_weak", ()))
         st.session_state.study_plan = days
     st.text(f"{planned_days}-day plan · {len(units)} study unit{'s' if len(units) != 1 else ''}")
+    weak = set(st.session_state.get("planned_weak", ()))
+    if weak:
+        st.caption("More time for: " + "; ".join(unit.title for unit in units if unit.unit_id in weak))
     if planned_days > len(days):
         start = len(days) + 1
         label = f"Day {start}" if start == planned_days else f"Days {start}–{planned_days}"
@@ -118,8 +128,10 @@ def render_outline(result: outline.Outline | None, height: int) -> None:
         if result is None:
             st.caption("Select Generate outline in the sidebar to see the topics and their source pages.")
             return
+        st.caption("Check the topics you find weak or unclear. They are used when you select Create study plan.")
         for index, topic in enumerate(result.topics):
             st.html(f"<h3>{escape(topic.title)}</h3><p>{escape(topic.summary)}</p>")
+            learner.render_weak_topic_checkbox(index)
             render_sources(topic.source_ids, f"citation_{index}")
 
 
@@ -163,9 +175,6 @@ def main() -> None:
         result = prepare_outline(pages)
         if result is not None:
             render_plan_controls(result)
-        has_plan = st.session_state.get("planned_days") is not None
-        if has_plan:
-            learner.render_self_report(st.session_state.study_units)
 
     has_plan = st.session_state.get("planned_days") is not None
     preview_column, learning_column = st.columns([3, 2] if has_plan else 2, gap=12)

@@ -59,9 +59,14 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 2. The app indexes readable PDF passages locally and ranks them with BM25. It retrieves passages from the assigned pages and looks elsewhere in the same document for related exercises, including chapter-end questions. OpenAI uses these excerpts to reuse, adapt, or write questions. Each question links to its source pages and shows its origin.
 3. Select an option and click **Check answer** to see feedback and the source of the answer. The app distinguishes a verified PDF answer key, an answer taken directly from the assigned reading, and a model reference answer. If model drafts fail validation, the app can use a clearly keyed exercise or build a fill-in-the-blank check from a numeric value in a relevant sentence on the assigned pages. When neither is available, the day shows that the reading had too little evidence for practice. Pages that teach nothing to assess, such as a title slide, an agenda, course logistics or references, get no practice: the app skips them when it finds no teaching point or exercise, and the model can also decline them. Either way the plan shows the reason. Questions and submitted answers follow the same unit and cited pages when you change days or adjust the schedule. They are kept in the current PDF session.
 
-### Telling the tutor what is unclear
+### Marking weak topics
 
-After you create a study plan, use **What's unclear?** in the sidebar to select units you don't understand and, optionally, describe the difficulty in a sentence. The tutor matches the sentence to units in your material and tells you when it describes something the material doesn't cover. **Learning status** shows each unit's status and the evidence behind it. A report alone only marks a unit as suspected; answers decide whether it is understood or a likely gap, and practice answers count as evidence.
+After the outline appears, check **I find this weak or unclear** under any topic. In the sidebar you can also describe what you don't understand in a sentence. Both are used when you select **Create study plan**:
+
+- Weak topics get more of the time. In a short plan their units share a day with fewer other units; in a long plan they get extra reading days first and a review day, before other units get extra reading days.
+- The tutor matches your sentence to units in the material, and tells you when it describes something the material doesn't cover.
+
+**Learning status** shows each unit's status and the evidence behind it. A unit marked weak is only suspected until answers check it; practice answers decide whether it is understood or a likely gap.
 
 ### Diagnosing a difficulty (command line)
 

@@ -19,6 +19,7 @@ class LearnerUITests(unittest.TestCase):
         topics = [
             Topic(title="Assignment", summary="Store a value.", source_ids=["p1"]),
             Topic(title="Iteration", summary="Repeat a block.", source_ids=["p2"]),
+            Topic(title="Loop counts", summary="Count iterations.", source_ids=["p3"]),
         ]
         outline = self.enterContext(patch("tutor.materials.outline.generate_outline"))
         outline.return_value = Outline(topics=topics)
@@ -31,50 +32,69 @@ class LearnerUITests(unittest.TestCase):
         self.mapper = self.enterContext(patch("tutor.agent.intake.generate_structured"))
         self.generate = self.enterContext(patch("tutor.assessment.questions.generate_questions"))
         self.app = AppTest.from_file(APP).run()
-        upload(self.app, "Assignment: x = 2.", "Iteration: loop twice.")
+        upload(self.app, "Assignment: x = 2.", "Iteration: loop twice.", "Counting: range(3).")
         button(self.app.sidebar, "Generate outline").click().run()
 
     def status_text(self):
         html = visible_text(self.app.main.container("learning_status_panel"))
         return re.sub(r"\s*<br>\s*", "\n", re.sub(r"</?(?:p|strong|small)>", "", html))
 
-    def test_self_report_is_saved_and_shown_as_a_suspicion(self):
-        self.assertFalse(self.app.sidebar.multiselect)
-        create_plan(self.app, 1)
-        self.assertIn("Assignment · Not checked yet", self.status_text())
-        self.mapper.return_value = NoteMapping(unit_ids=["unit-2"], not_in_material=True, missing_topic="while loops")
-        self.app.sidebar.multiselect(key="self_report_units").set_value(["unit-1"])
-        self.app.sidebar.text_area(key="self_report_note").set_value("Loops, especially while loops")
-        button(self.app.sidebar, "Save").click().run()
+    def plan(self, days, *weak, note=None):
+        for index in weak:
+            self.app.checkbox(key=f"weak_topic_{index}").check()
+        if note is not None:
+            self.app.sidebar.text_area(key="self_report_note").set_value(note)
+        create_plan(self.app, days)
         self.assertFalse(self.app.exception)
-        text = self.status_text()
-        self.assertIn("Assignment · Marked unclear · not checked yet", text)
-        self.assertIn("Iteration · Marked unclear · not checked yet", text)
-        self.assertIn("your note: “Loops, especially while loops”", text)
-        self.assertIn("Your note matches: Iteration", visible_text(self.app.sidebar))
-        self.assertIn("while loops", self.app.sidebar.info[0].value)
-        # Changing the duration keeps the same units and the same report.
-        create_plan(self.app, 2)
-        self.assertIn("Assignment · Marked unclear", self.status_text())
 
-    def test_a_failed_note_match_keeps_the_previous_report(self):
-        create_plan(self.app, 1)
-        self.app.sidebar.multiselect(key="self_report_units").set_value(["unit-2"])
-        button(self.app.sidebar, "Save").click().run()
+    def plan_text(self):
+        return visible_text(self.app.main.container("plan_panel"))
+
+    def test_weak_topics_on_the_outline_get_more_time(self):
+        self.assertEqual(len(self.app.main.container("outline_panel").checkbox), 3)
+        self.plan(2, 1)
+        self.assertIn("More time for: Iteration", self.plan_text())
+        self.assertIn("Iteration · Marked weak · not checked yet", self.status_text())
+        self.assertIn("Assignment · Not checked yet", self.status_text())
         self.mapper.assert_not_called()
+        # A long plan gives the weak unit a review day.
+        self.plan(6)
+        kinds = [(a.unit.title, a.kind) for day in self.app.session_state["study_plan"] for a in day.assignments]
+        self.assertIn(("Iteration", "review"), kinds)
+        self.assertNotIn(("Assignment", "review"), kinds)
+
+    def test_note_is_matched_once_and_reported_when_not_covered(self):
+        self.mapper.return_value = NoteMapping(unit_ids=["unit-3"], not_in_material=True, missing_topic="while loops")
+        self.plan(3, 0, note="Counting loops, especially while loops")
+        self.assertEqual(self.app.session_state["planned_weak"], ("unit-1", "unit-3"))
+        text = self.status_text()
+        self.assertIn("Loop counts · Marked weak · not checked yet", text)
+        self.assertIn("your note: “Counting loops, especially while loops”", text)
+        self.assertIn("Your note matches: Loop counts", visible_text(self.app.sidebar))
+        self.assertIn("while loops", self.app.sidebar.info[0].value)
+        # Changing only the duration keeps the report and does not ask the model again.
+        self.plan(5)
+        self.assertEqual(self.mapper.call_count, 1)
+        self.assertIn("Loop counts · Marked weak", self.status_text())
+        # Unchecking a topic changes the plan on the next submission.
+        self.app.checkbox(key="weak_topic_0").uncheck()
+        self.plan(5)
+        self.assertEqual(self.app.session_state["planned_weak"], ("unit-3",))
+
+    def test_a_failed_note_match_still_creates_the_plan(self):
         self.mapper.side_effect = LLMError("Could not reach OpenAI.")
-        self.app.sidebar.text_area(key="self_report_note").set_value("loops")
-        button(self.app.sidebar, "Save").click().run()
+        self.plan(2, 1, note="loops")
         self.assertIn("Could not reach OpenAI.", self.app.sidebar.error[0].value)
-        self.assertIn("Iteration · Marked unclear", self.status_text())
+        self.assertEqual(self.app.session_state["planned_weak"], ("unit-2",))
+        self.assertIn("Iteration · Marked weak", self.status_text())
 
     def test_practice_answers_update_the_unit_status(self):
         question = Question(
             kind="multiple_choice", prompt="Which value is assigned?", options=("2", "3"), correct_index=0,
             explanation="x = 2 stores 2.", origin="generated", source_ids=("p1",), answer_origin="reference",
         )
-        self.generate.side_effect = [(question,), ()]
-        create_plan(self.app, 1)
+        self.generate.side_effect = [(question,), (), ()]
+        self.plan(1)
         button(self.app.main.container("plan_panel"), "Generate daily practice").click().run()
         self.app.radio[0].set_value("3").run()
         button(self.app, "Check answer").click().run()

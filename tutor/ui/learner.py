@@ -1,11 +1,11 @@
-"""Ask what the learner finds unclear and show the evidence behind each unit's status."""
+"""Weak topics marked on the outline, the learner's note, and the evidence behind each unit's status."""
 
 from collections.abc import Sequence
 from html import escape
 
 import streamlit as st
 
-from tutor.agent.intake import MAX_NOTE_CHARS, read_self_report
+from tutor.agent.intake import MAX_NOTE_CHARS, Intake, read_self_report
 from tutor.agent.state import LearnerState
 from tutor.llm import LLMError
 from tutor.planning import StudyUnit
@@ -13,12 +13,47 @@ from tutor.planning import StudyUnit
 
 STATUS_LABELS = {
     "untested": "Not checked yet",
-    "suspected": "Marked unclear · not checked yet",
+    "suspected": "Marked weak · not checked yet",
     "uncertain": "Needs more evidence",
     "mastered": "Understood",
     "gap": "Likely gap",
 }
-_FORM_KEYS = ("self_report_units", "self_report_note")
+WEAK_TOPIC_PREFIX = "weak_topic_"
+NOTE_KEY = "self_report_note"
+
+
+def weak_topic_key(index: int) -> str:
+    return f"{WEAK_TOPIC_PREFIX}{index}"
+
+
+def render_weak_topic_checkbox(index: int) -> None:
+    st.checkbox("I find this weak or unclear", key=weak_topic_key(index))
+
+
+def clear_weak_topics() -> None:
+    for key in [key for key in st.session_state if str(key).startswith(WEAK_TOPIC_PREFIX)]:
+        del st.session_state[key]
+
+
+def weak_topic_numbers() -> set[int]:
+    """1-based outline topic numbers the learner has checked."""
+    return {
+        int(str(key)[len(WEAK_TOPIC_PREFIX):]) + 1
+        for key, checked in st.session_state.items()
+        if str(key).startswith(WEAK_TOPIC_PREFIX) and checked
+    }
+
+
+def weak_unit_ids(units: Sequence[StudyUnit]) -> tuple[str, ...]:
+    topics = weak_topic_numbers()
+    return tuple(unit.unit_id for unit in units if topics.intersection(unit.topic_ids))
+
+
+def render_note_input() -> None:
+    st.text_area(
+        "Describe what you don't understand (optional)", max_chars=MAX_NOTE_CHARS, key=NOTE_KEY,
+        help="For example: “I don't see why x = x + 1 changes x.” The tutor matches it to your material.",
+    )
 
 
 def learner_state(units: Sequence[StudyUnit]) -> LearnerState:
@@ -27,38 +62,36 @@ def learner_state(units: Sequence[StudyUnit]) -> LearnerState:
     if state is None or not state.matches(units):
         state = LearnerState(units)
         st.session_state.learner_state = state
-        for key in ("learner_intake", *_FORM_KEYS):
-            st.session_state.pop(key, None)
+        st.session_state.pop("learner_intake", None)
     return state
 
 
-def render_self_report(units: Sequence[StudyUnit]) -> None:
+def apply_plan_inputs(units: Sequence[StudyUnit]) -> tuple[str, ...]:
+    """Record the weak topics and note submitted with the plan; return the weak unit IDs.
+
+    The note is matched again only when it or the weak topics change.
+    """
     state = learner_state(units)
-    titles = {unit.unit_id: unit.title for unit in units}
-    with st.form("self_report"):
-        st.subheader("What's unclear?")
-        checked = st.multiselect(
-            "Units I don't understand", options=list(titles), format_func=titles.__getitem__,
-            key="self_report_units",
-        )
-        note = st.text_area(
-            "Describe what you don't understand (optional)", max_chars=MAX_NOTE_CHARS, key="self_report_note",
-            help="For example: “I don't see why x = x + 1 changes x.” The tutor matches it to your material.",
-        )
-        submitted = st.form_submit_button("Save")
-    if submitted:
+    checked = weak_unit_ids(units)
+    note = " ".join(str(st.session_state.get(NOTE_KEY, "")).split())
+    previous: Intake | None = st.session_state.get("learner_intake")
+    if previous is None or previous.checked_ids != checked or previous.note != note:
         try:
             with st.spinner("Matching your note to the material…"):
                 intake = read_self_report(units, checked, note)
         except LLMError as error:
-            st.error(str(error))
-            return
-        state.apply_report(intake.checked_ids, intake.note, intake.noted_ids, intake.missing_topic)
+            st.error(f"Your note could not be matched to the material. {error}")
+            intake = Intake(checked, "", (), None)
         st.session_state.learner_intake = intake
+        state.apply_report(intake.checked_ids, intake.note, intake.noted_ids, intake.missing_topic)
+    return st.session_state.learner_intake.unit_ids
 
-    intake = st.session_state.get("learner_intake")
+
+def render_intake_feedback(units: Sequence[StudyUnit]) -> None:
+    intake: Intake | None = st.session_state.get("learner_intake")
     if intake is None:
         return
+    titles = {unit.unit_id: unit.title for unit in units}
     if intake.noted_ids:
         st.caption("Your note matches: " + "; ".join(titles[unit_id] for unit_id in intake.noted_ids))
     if intake.missing_topic:
@@ -74,7 +107,7 @@ def _evidence_text(evidence) -> str:
         right = sum(answer.correct for answer in evidence.answers)
         parts.append(f"{right} of {len(evidence.answers)} answers correct")
     if evidence.self_reported:
-        parts.append("you marked it unclear")
+        parts.append("you marked it weak")
     if evidence.notes:
         parts.append(f"your note: “{evidence.notes[0]}”")
     return " · ".join(parts) or "No answers yet"

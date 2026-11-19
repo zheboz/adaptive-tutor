@@ -15,6 +15,9 @@ from tutor.planning import StudyAssignment
 def practice_key(document_id: str, assignment: StudyAssignment) -> str:
     # Dates can change. The document, unit and assigned reading identify the material.
     parts = [document_id, assignment.unit.unit_id, *sorted(set(assignment.source_ids))]
+    if assignment.kind == "review":
+        # A review day revisits the same pages as the unit's task, with fresh questions.
+        parts.append("review")
     return sha256("|".join(parts).encode()).hexdigest()
 
 

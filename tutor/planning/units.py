@@ -39,6 +39,8 @@ class StudyUnit:
     objective: str
     source_ids: tuple[str, ...]
     activity: str
+    # 1-based outline topic numbers this unit covers, so weak topics can be traced to units.
+    topic_ids: tuple[int, ...] = ()
 
 
 _PLAN = """Design an ordered sequence of study units covering the supplied PDF outline.
@@ -132,6 +134,7 @@ def build_study_units(outline: Outline, plan: UnitPlan | None = None) -> tuple[S
                 objective=objective,
                 source_ids=source_ids,
                 activity=activity,
+                topic_ids=tuple(step.topic_ids),
             )
         )
     return tuple(units)
