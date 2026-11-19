@@ -76,9 +76,11 @@ After the outline appears, check **I find this weak or unclear** under any topic
 
 ### Checking your understanding
 
-The tutor checks what you know at two points, and adjusts the plan to the answers. In both, it chooses each question from your earlier answers and shows why, and it reports a confirmed gap only after at least two wrong answers on a unit that outnumber the correct ones; otherwise the conclusion stays uncertain. Questions come from your material.
+The tutor checks what you know at two points. In both, it chooses each question from your earlier answers and shows why, and it reports a confirmed gap only after at least two wrong answers on a unit that outnumber the correct ones; otherwise the conclusion stays uncertain. Questions come from your material.
 
-- **Initial check.** After you create the plan, select **Start initial check** (or **Skip**). The tutor asks up to five questions, starting with the topics you marked weak and checking whether an earlier unit is the real cause. Units the answers show to be weak get more of the plan; a marked unit you answer correctly gets no extra time.
+After every answer you see whether it was right, the correct answer, an explanation, and the passage of your material that supports it, with a link that opens that page beside the check. At the end, **Your answers in this check** lists every question again with its feedback.
+
+- **Initial check (after the outline, before the plan).** Check the topics you find weak in the outline, then select **Start initial check** in the sidebar. The study units are prepared, and the tutor asks up to five questions in place of the outline, starting with the topics you marked and checking whether an earlier unit is the real cause. The plan can't be created until you finish or stop the check. Then set the days and select **Create study plan**: units your answers show to be weak get more of the time, and a marked unit you answered correctly gets no extra time. The check is optional; you can create the plan directly.
 - **Daily check.** After a day's practice, select **Check my understanding**. The tutor reads that day's practice answers and asks up to three more questions about that day's and earlier units. It then continues, adds a review of today's unit after its remaining study days, or adds a review of an earlier unit. A review already planned later is not added twice.
 
 The plan shows your goal, how many days the plan now has, and how many you have checked. When reviews make the plan longer than your goal, it says by how much; you can keep going at your pace or create the plan again with more days. **Plan changes** lists each change and the answers behind it.

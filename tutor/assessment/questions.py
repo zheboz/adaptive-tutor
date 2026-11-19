@@ -31,6 +31,9 @@ class Question:
     answer_origin: Literal["pdf", "reference", "reading"]
     # The learning point in the assigned reading that this question checks.
     concept_id: str | None = None
+    # The verified excerpt of the material that supports the answer, and the page it is on.
+    evidence: str = ""
+    evidence_source_id: str | None = None
 
 
 class PracticeError(ValueError):
@@ -254,7 +257,8 @@ def _check_question(draft: QuestionDraft, passages: dict[str, Passage], scope: s
         refs.append(draft.answer_key)
     sources = tuple(dict.fromkeys(passages[ref.passage_id].source_id for ref in refs))
     return Question(draft.kind, prompt, options, draft.correct_index, explanation, draft.origin,
-                    sources, "pdf" if printed_answer else "reference", draft.concept_id)
+                    sources, "pdf" if printed_answer else "reference", draft.concept_id,
+                    grounding.quote.strip(), passages[grounding.passage_id].source_id)
 
 
 def _document_order(passage: Passage) -> tuple[int, int]:
@@ -388,7 +392,7 @@ def generate_questions(
                 score = topical_overlap(focus, stem)
                 if score:
                     question = Question(kind, stem, options, answer, f"PDF answer: {options[answer]}",
-                                        "pdf", (passage.source_id,), "pdf")
+                                        "pdf", (passage.source_id,), "pdf", evidence_source_id=passage.source_id)
                     originals.append((score, question))
         if originals:
             return (max(originals, key=lambda item: item[0])[1],)

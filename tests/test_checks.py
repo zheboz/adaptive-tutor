@@ -89,21 +89,25 @@ class FocusAndReplanTests(unittest.TestCase):
         self.state.flag("unknown")
         self.assertNotIn("unknown", self.state.flagged)
 
-    def test_initial_check_replans_and_explains(self):
+    def test_initial_check_reports_which_units_get_more_time(self):
         self.state.apply_report(["unit-1"])
         self.answer("unit-1", True, True)
         self.answer("unit-2", False, False)
-        weak, days, change = after_initial_check(
-            self.state, diagnosis("unit-2", "confirmed", "review_gap", ["q3", "q4"]), ("unit-1",), 6,
-        )
+        weak, change = after_initial_check(self.state, diagnosis("unit-2", "confirmed", "review_gap", ["q3", "q4"]))
         self.assertEqual(weak, ("unit-2",))
-        self.assertEqual(days, schedule_units(UNITS, 6, ("unit-2",)))
         self.assertEqual(change.trigger, "Initial check")
-        self.assertIn("More time for Variable updates (0 of 2 answers correct).", change.message)
-        self.assertIn("Assignment no longer gets extra time (2 of 2 answers correct).", change.message)
+        self.assertIn("Variable updates will get more time (0 of 2 answers correct).", change.message)
+        self.assertIn("Assignment won't get extra time (2 of 2 answers correct).", change.message)
         self.assertEqual(change.evidence, ("q3", "q4"))
-        _, _, unchanged = after_initial_check(self.state, diagnosis(), weak, 6)
-        self.assertIn("keeps the same focus", unchanged.message)
+        # The plan created afterwards gives the weak unit more time.
+        self.assertEqual(self.state.focus_units(), weak)
+
+    def test_initial_check_without_changes_says_so(self):
+        _, change = after_initial_check(self.state, diagnosis())
+        self.assertIn("spread the time evenly", change.message)
+        self.state.apply_report(["unit-3"])
+        _, change = after_initial_check(self.state, diagnosis())
+        self.assertIn("Your answers support the topics you marked", change.message)
 
     def test_daily_check_inserts_a_review_after_the_day(self):
         days = schedule_units(UNITS, 3)

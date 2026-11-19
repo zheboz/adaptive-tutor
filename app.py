@@ -23,39 +23,72 @@ def reset_preview() -> None:
     learner.clear_weak_topics()
 
 
-def render_plan_controls(result: outline.Outline) -> None:
+def ensure_units(result: outline.Outline) -> tuple[planning.StudyUnit, ...] | None:
+    """Build the study units once. They depend only on the outline, not on the number of days."""
     # Retire schedules from sessions opened before model-planned units were introduced.
     if "study_units" in st.session_state and "unit_plan" not in st.session_state:
         for key in ("study_units", "study_plan", "planned_days", "study_day"):
             st.session_state.pop(key, None)
+    try:
+        if "unit_plan" not in st.session_state:
+            with st.spinner("Planning the learning units…"):
+                st.session_state.unit_plan = planning.plan_units(result)
+        if "study_units" not in st.session_state:
+            with st.spinner("Preparing study tasks for the planned units…"):
+                st.session_state.study_units = planning.build_study_units(result, st.session_state.unit_plan)
+    except (LLMError, planning.PlanningError) as error:
+        st.error(str(error))
+        return None
+    return st.session_state.study_units
+
+
+def render_initial_check_controls(result: outline.Outline, pages: list[PdfPage]) -> None:
+    """Between the outline and the plan: check the weak topics with a few questions."""
+    if st.session_state.get("planned_days") is not None:
+        return
+    st.subheader("Initial check")
+    summary = st.session_state.get("initial_check_summary")
+    if summary:
+        st.caption(f"Done. {summary}")
+    else:
+        st.caption("Optional, before you plan: check the topics you find weak in the outline, then answer "
+                   "up to 5 questions. Your plan uses the answers.")
+    if st.button("Check again" if summary else "Start initial check", key="start_initial_check",
+                 disabled=check.active()):
+        units = ensure_units(result)
+        if units is not None:
+            learner.apply_plan_inputs(units)
+            check.start_initial_check(units, pages)
+            st.rerun()
+
+
+def render_plan_controls(result: outline.Outline) -> None:
+    running = check.initial_running()
     with st.form("study_duration"):
         target_days = st.number_input(
             "Target duration (days)", min_value=1, value=7, step=1, key="study_target_days",
             help="Choose how many days to spend on the full outline.",
         )
-        st.caption("Topics you check as weak in the outline get more of the time.")
+        st.caption("Finish or stop the initial check before creating the plan." if running else
+                   "Topics you check as weak, and units the initial check finds weak, get more of the time.")
         create_plan = st.form_submit_button(
-            "Create study plan", help="OpenAI prepares the study tasks once. Changing the duration reuses them."
+            "Create study plan", disabled=running,
+            help="OpenAI prepares the study tasks once. Changing the duration reuses them.",
         )
 
     if create_plan:
-        try:
-            if "unit_plan" not in st.session_state:
-                with st.spinner("Planning the learning units…"):
-                    st.session_state.unit_plan = planning.plan_units(result)
-            if "study_units" not in st.session_state:
-                with st.spinner("Preparing study tasks for the planned units…"):
-                    st.session_state.study_units = planning.build_study_units(result, st.session_state.unit_plan)
-        except (LLMError, planning.PlanningError) as error:
-            st.error(str(error))
+        units = ensure_units(result)
+        if units is None:
             return
-        weak = learner.apply_plan_inputs(st.session_state.study_units)
+        weak = learner.apply_plan_inputs(units)
         if st.session_state.get("planned_days") != target_days or st.session_state.get("planned_weak") != weak:
             st.session_state.pop("study_plan", None)
             st.session_state.planned_days = target_days
             st.session_state.planned_weak = weak
             st.session_state.study_day = 1
             check.reset_progress()
+            # The initial check controls above the form were drawn before the plan existed.
+            st.rerun()
 
 
 def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
@@ -69,12 +102,13 @@ def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
         st.session_state.study_plan = days
     if check.render_check(units):
         return
-    check.render_initial_offer(units, pages)
     days = st.session_state.study_plan
     st.text(f"{planned_days}-day plan · {len(units)} study unit{'s' if len(units) != 1 else ''}")
     weak = set(st.session_state.get("planned_weak", ()))
     if weak:
         st.caption("More time for: " + "; ".join(unit.title for unit in units if unit.unit_id in weak))
+    if st.session_state.get("initial_check_summary"):
+        st.caption(f"From your initial check: {st.session_state.initial_check_summary}")
     done = check.completed_days()
     st.caption(f"Goal: {planned_days} days · plan: {len(days)} study days · "
                f"{len(done)} checked · {sum(n not in done for n in range(1, len(days) + 1))} to go")
@@ -203,10 +237,13 @@ def main() -> None:
     with st.sidebar:
         result = prepare_outline(pages)
         if result is not None:
+            render_initial_check_controls(result, pages)
             render_plan_controls(result)
 
     has_plan = st.session_state.get("planned_days") is not None
-    preview_column, learning_column = st.columns([3, 2] if has_plan else 2, gap=12)
+    # Before a plan exists, an initial check takes the outline's place beside the PDF.
+    checking = not has_plan and check.active()
+    preview_column, learning_column = st.columns([3, 2] if has_plan or checking else 2, gap=12)
     with preview_column:
         page = render_pdf_preview(upload, pages)
     with learning_column:
@@ -214,12 +251,17 @@ def main() -> None:
             st.header("Daily study plan")
             with st.container(height=READER_PANEL_HEIGHT, border=True, key="plan_panel"):
                 render_study_plan(pages, upload.file_id)
+        elif checking:
+            st.header("Initial check")
+            with st.container(height=READER_PANEL_HEIGHT, border=True, key="check_panel"):
+                check.render_check(st.session_state.study_units)
         else:
             render_outline(result, READER_PANEL_HEIGHT)
     if result is not None:
         tutor_chat.render_tutor_chat(pages, tutor_context(result), 360)
-    if has_plan:
+    if "study_units" in st.session_state:
         learner.render_learning_status(st.session_state.study_units, 280)
+    if has_plan or checking:
         render_outline(result, 320)
     render_extracted_text(page)
 

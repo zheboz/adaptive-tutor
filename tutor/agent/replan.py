@@ -7,7 +7,7 @@ be traced to the answers behind it. No Streamlit code belongs here.
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from tutor.planning import StudyDay, insert_review, schedule_units
+from tutor.planning import StudyDay, insert_review
 
 from .state import LearnerState
 from .tools import Diagnosis
@@ -26,26 +26,26 @@ def _answers_text(state: LearnerState, unit_id: str) -> str:
     return f"{right} of {len(answers)} answers correct" if answers else "no answers yet"
 
 
-def after_initial_check(
-    state: LearnerState, diagnosis: Diagnosis, previous_weak: Sequence[str], target_days: int,
-) -> tuple[tuple[str, ...], tuple[StudyDay, ...], PlanChange]:
-    """Re-plan the whole course around the units the check found weak."""
+def after_initial_check(state: LearnerState, diagnosis: Diagnosis) -> tuple[tuple[str, ...], PlanChange]:
+    """Record the check's conclusion before planning; return the units the plan should give more time.
+
+    The check runs before the plan exists, so nothing is scheduled here: the units it finds weak
+    get more time when the learner creates the plan.
+    """
     if diagnosis.primary_gap:
         state.flag(diagnosis.primary_gap)
     weak = state.focus_units()
-    units = [evidence.unit for evidence in state.units.values()]
-    days = schedule_units(units, target_days, weak)
+    reported = [unit_id for unit_id, evidence in state.units.items() if evidence.self_reported]
 
     def title(unit_id: str) -> str:
         return state.units[unit_id].unit.title
 
-    added = [u for u in weak if u not in previous_weak]
-    removed = [u for u in previous_weak if u not in weak and u in state.units]
-    parts = [f"More time for {title(u)} ({_answers_text(state, u)})." for u in added]
-    parts += [f"{title(u)} no longer gets extra time ({_answers_text(state, u)})." for u in removed]
+    parts = [f"{title(u)} will get more time ({_answers_text(state, u)})." for u in weak if u not in reported]
+    parts += [f"{title(u)} won't get extra time ({_answers_text(state, u)})." for u in reported if u not in weak]
     if not parts:
-        parts = ["Your answers support the topics you marked, so the plan keeps the same focus."]
-    return weak, days, PlanChange("Initial check", " ".join(parts), diagnosis.evidence)
+        parts = (["Your answers support the topics you marked, so they will get more time."] if weak
+                 else ["No weak unit was found, so the plan will spread the time evenly."])
+    return weak, PlanChange("Initial check", " ".join(parts), diagnosis.evidence)
 
 
 def after_daily_check(

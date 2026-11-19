@@ -1,4 +1,4 @@
-"""The tutor's checks in the plan panel: an initial check before studying, and a check after each day.
+"""The tutor's checks: an initial check after the outline and before the plan, and a check after each day.
 
 Both run the same ReAct agent with a different configuration. Each answer is submitted in the main
 script run so a spinner can show while the tutor chooses the next step.
@@ -9,17 +9,19 @@ from typing import Any
 
 import streamlit as st
 
-from tutor.agent.bank import QuestionBank
+from tutor.agent.bank import DiagnosticQuestion, QuestionBank
 from tutor.agent.loop import Ask, Done, advance, start_session
 from tutor.agent.replan import PlanChange, after_daily_check, after_initial_check
 from tutor.agent.tools import daily_config, initial_config
 from tutor.llm import LLMError, tracing
 from tutor.materials.ingest import PdfPage
 from tutor.planning import StudyDay, StudyUnit
+from tutor.ui.citations import render_sources
 from tutor.ui.learner import learner_state
 
 
-CHECK_KEYS = ("check", "initial_check", "plan_changes", "completed_days", "diagnostic_bank")
+CHECK_KEYS = ("check", "initial_check", "initial_check_summary", "plan_changes", "completed_days",
+              "diagnostic_bank")
 # The first units a check is likely to ask about are prepared in the background.
 PREFETCH_UNITS = 3
 
@@ -58,15 +60,21 @@ def _start(mode: str, units: Sequence[StudyUnit], pages: Sequence[PdfPage], firs
                               "error": None, "applied": False, "change": None}
 
 
+def active() -> bool:
+    return st.session_state.get("check") is not None
+
+
+def initial_running() -> bool:
+    check = st.session_state.get("check")
+    return check is not None and check["mode"] == "initial"
+
+
 def start_initial_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> None:
+    """Start from the weak topics checked on the outline; call after recording them."""
     state = learner_state(units)
     first = state.focus_units() or tuple(unit.unit_id for unit in units)
     _start("initial", units, pages, first)
     st.session_state.initial_check = "running"
-
-
-def skip_initial_check() -> None:
-    st.session_state.initial_check = "skipped"
 
 
 def start_daily_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage], days: Sequence[StudyDay], day: int) -> None:
@@ -89,18 +97,17 @@ def _advance(check: dict[str, Any], answer: int | None) -> None:
 
 
 def _apply(check: dict[str, Any]) -> None:
-    """Change the plan once, when the check concludes."""
+    """Record the conclusion once: the initial check informs the plan to come; a daily check changes it."""
     if check["applied"]:
         return
     state = check["session"].state
     diagnosis = check["step"].diagnosis
     if check["mode"] == "initial":
-        weak, days, change = after_initial_check(
-            state, diagnosis, st.session_state.get("planned_weak", ()), st.session_state.planned_days,
-        )
-        st.session_state.planned_weak = weak
-        st.session_state.study_plan = days
+        # No plan exists yet. The answers stay in the learner state, so the plan created next
+        # gives the units they show to be weak more time.
+        _, change = after_initial_check(state, diagnosis)
         st.session_state.initial_check = "done"
+        st.session_state.initial_check_summary = change.message
     else:
         day = check["day"]
         before = st.session_state.study_plan
@@ -113,23 +120,10 @@ def _apply(check: dict[str, Any]) -> None:
             done.clear()
             done.update(shifted)
         done.add(day)
-    if change is not None:
-        plan_changes().append(change)
+        if change is not None:
+            plan_changes().append(change)
     check["change"] = change
     check["applied"] = True
-
-
-def render_initial_offer(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> None:
-    if st.session_state.get("initial_check") or st.session_state.get("check"):
-        return
-    with st.container(border=True, key="initial_check_offer"):
-        st.markdown("**Initial check**")
-        st.caption("Before you start, answer up to 5 questions so the tutor can confirm which topics "
-                   "need more time. The plan is adjusted to your answers.")
-        with st.container(horizontal=True):
-            st.button("Start initial check", key="start_initial_check", type="primary",
-                      on_click=start_initial_check, args=(units, pages))
-            st.button("Skip", key="skip_initial_check", on_click=skip_initial_check)
 
 
 def render_daily_check_button(units: Sequence[StudyUnit], pages: Sequence[PdfPage],
@@ -153,8 +147,33 @@ def _evidence_line(check: dict[str, Any]) -> str:
     return "; ".join(parts)
 
 
+def _render_feedback(number: int, item: DiagnosticQuestion, choice: int, title: str) -> None:
+    """Right or wrong, the correct answer, and where the material says so."""
+    question = item.question
+    correct = choice == question.correct_index
+    verdict = "Correct" if correct else "Not quite"
+    (st.success if correct else st.warning)(f"Question {number} · {title}: {verdict}.")
+    st.text(question.prompt)
+    if correct:
+        st.text(f"Your answer: {question.options[choice]}")
+    else:
+        st.text(f"Your answer: {question.options[choice]}\nCorrect answer: {question.options[question.correct_index]}")
+    if question.explanation and question.explanation != question.evidence:
+        st.text(question.explanation)
+    page = question.evidence_source_id
+    evidence = " ".join(question.evidence.split())
+    if evidence and page:
+        st.caption(f"In your material, page {page[1:]}: “{evidence}”")
+    elif page:
+        st.caption(f"The answer is printed on page {page[1:]} of your material.")
+    if question.answer_origin == "pdf" and evidence:
+        st.caption("The correct answer is the one printed with this exercise in your material.")
+    pages = list(dict.fromkeys([page] if page else question.source_ids))
+    render_sources(pages, f"check_feedback_{item.id}")
+
+
 def render_check(units: Sequence[StudyUnit]) -> bool:
-    """Show the active check. Returns True while a check occupies the plan panel."""
+    """Show the active check. Returns True while a check occupies the panel."""
     check = st.session_state.get("check")
     if not check:
         return False
@@ -175,7 +194,13 @@ def render_check(units: Sequence[StudyUnit]) -> bool:
         return True
 
     step = check["step"]
+    answered = check.setdefault("answered", [])
     if isinstance(step, Ask):
+        if answered:
+            # Feedback on the previous answer, before the next question.
+            item, choice = answered[-1]
+            with st.container(border=True, key=f"check_last_feedback_{item.id}"):
+                _render_feedback(len(answered), item, choice, titles[item.unit_id])
         question = step.question.question
         st.caption(f"Question {step.number} of up to {session.config.max_questions} · "
                    f"{titles[step.question.unit_id]}")
@@ -186,6 +211,7 @@ def render_check(units: Sequence[StudyUnit]) -> bool:
                               key=f"check_choice_{step.question.id}", label_visibility="collapsed")
             submitted = st.form_submit_button("Submit answer")
         if submitted and choice is not None:
+            answered.append((step.question, question.options.index(choice)))
             _advance(check, question.options.index(choice))
             st.rerun()
         st.button("Stop check", key="check_stop", on_click=end_check)
@@ -205,10 +231,17 @@ def render_check(units: Sequence[StudyUnit]) -> bool:
     evidence = _evidence_line(check)
     if evidence:
         st.caption(f"Based on: {evidence}")
-    if check["change"] is not None:
+    if check["mode"] == "initial":
+        st.info(f"For your plan · {check['change'].message}")
+        st.caption("Set the number of days and select Create study plan to use these results.")
+    elif check["change"] is not None:
         st.info(f"Plan change · {check['change'].message}")
     elif check["mode"] == "daily":
         st.caption("The plan is unchanged.")
+    if answered:
+        with st.expander(f"Your answers in this check ({len(answered)})", expanded=True):
+            for number, (item, choice) in enumerate(answered, start=1):
+                _render_feedback(number, item, choice, titles[item.unit_id])
     trace = session.trace
     st.caption(f"This check: {trace.model_calls} model calls · {trace.total_tokens} tokens")
     st.button("Continue", key="check_close", type="primary", on_click=end_check)
