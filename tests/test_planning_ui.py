@@ -11,7 +11,15 @@ from tutor.materials.outline import Outline, Topic
 from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
 
 
+def finish_quiz(app):
+    """Take the initial quiz with no questions, which leads straight to the plan controls."""
+    with patch("tutor.assessment.questions.generate_questions", return_value=()):
+        button(app.sidebar, "Start initial quiz").click().run()
+
+
 def create_plan(app, days):
+    if not any(widget.label == "Create study plan" for widget in app.sidebar.button):
+        finish_quiz(app)
     app.sidebar.number_input(key="study_target_days").set_value(days)
     button(app.sidebar, "Create study plan").click().run()
 
@@ -89,10 +97,13 @@ class PlanningUITests(unittest.TestCase):
         document = upload(app, "Variable updates", "Loop tracing")
         self.assertFalse(app.number_input)
         button(app, "Generate outline").click().run()
+        # The plan controls appear only after the initial quiz, which builds the units.
+        self.assertNotIn("study_target_days", [w.key for w in app.sidebar.number_input])
+        self.model.assert_not_called()
+        finish_quiz(app)
         target = app.number_input(key="study_target_days")
         self.assertEqual(target.label, "Target duration (days)")
         self.assertEqual(target.value, 7)
-        self.model.assert_not_called()
 
         create_plan(app, 5)
         units = app.session_state["study_units"]
@@ -155,6 +166,7 @@ class PlanningUITests(unittest.TestCase):
         upload(app, "Sorting")
         self.assert_plan_cleared()
         button(app, "Generate outline").click().run()
+        finish_quiz(app)
         self.assertEqual(app.number_input(key="study_target_days").value, 7)
         create_plan(app, 20)
         self.assertEqual(app.session_state["unit_plan"], sort_plan)
@@ -176,16 +188,17 @@ class PlanningUITests(unittest.TestCase):
         upload(app, "Variable updates", "Loop tracing")
         button(app, "Generate outline").click().run()
 
-        create_plan(app, 5)
+        # The units are built when the initial quiz starts; each failure can be retried there.
+        finish_quiz(app)
         self.assertIn("Could not plan units.", [item.value for item in app.error])
         self.assertNotIn("unit_plan", app.session_state)
-        self.assertNotIn("study_plan", app.session_state)
+        self.assertNotIn("quiz", app.session_state)
 
-        create_plan(app, 5)
+        finish_quiz(app)
         self.assertIn("Could not prepare tasks.", [item.value for item in app.error])
         self.assertEqual(app.session_state["unit_plan"], self.plan)
         self.assertNotIn("study_units", app.session_state)
-        self.assertNotIn("study_plan", app.session_state)
+        self.assertNotIn("quiz", app.session_state)
         app.selectbox(key="pdf_page_number").select(2).run()
         self.assertEqual(self.model.call_count, 3)
 

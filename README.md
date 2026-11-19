@@ -59,11 +59,16 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 2. The app indexes readable PDF passages locally and ranks them with BM25. It retrieves passages from the assigned pages and looks elsewhere in the same document for related exercises, including chapter-end questions. OpenAI uses these excerpts to reuse, adapt, or write questions. Each question links to its source pages and shows its origin.
 3. Select an option and click **Check answer** to see feedback and the source of the answer. The app distinguishes a verified PDF answer key, an answer taken directly from the assigned reading, and a model reference answer. If model drafts fail validation, the app can use a clearly keyed exercise or build a fill-in-the-blank check from a numeric value in a relevant sentence on the assigned pages. When neither is available, the day shows that the reading had too little evidence for practice. Pages that teach nothing to assess, such as a title slide, an agenda, course logistics or references, get no practice: the app skips them when it finds no teaching point or exercise, and the model can also decline them. Either way the plan shows the reason. Questions and submitted answers follow the same unit and cited pages when you change days or adjust the schedule. They are kept in the current PDF session.
 
-### Marking weak topics
+### Initial quiz, then the plan
 
-After the outline appears, check **I find this weak or unclear** under any topic, then select **Create study plan**. Weak topics get more of the time: in a short plan their units share a day with fewer other units; in a long plan they get extra reading days first and a review day, before other units get extra reading days. Changing the checks takes effect the next time you create the plan.
+1. After the outline appears, check **I don't understand this** under the topics you find unclear.
+2. Select **Start initial quiz** in the sidebar. The study units are prepared, and the quiz takes the outline's place beside the PDF:
+   - With topics checked, there is one question for each checked topic, in the order you checked them. Each question is built from that topic's own pages.
+   - With nothing checked, up to three questions come from topics spread across the whole material.
+3. Answer every question and select **Submit answers**. Only then do you see whether each answer was right, the correct answer, an explanation, and the passage of your material that supports it, with a link that opens that page.
+4. The plan controls appear after the results. Set the number of days and select **Create study plan**. Topics you checked, and topics you answered wrong, get more of the time: in a short plan their units share a day with fewer other units; in a long plan they get extra reading days first and a review day.
 
-**Learning status** shows each unit's status and the evidence behind it. A unit marked weak is only suspected until answers check it; practice answers decide whether it is understood or a likely gap. To ask about something specific you don't understand, use **Ask the tutor**.
+**Learning status** shows each unit's status and the evidence behind it. To ask about something specific you don't understand, use **Ask the tutor**.
 
 ### Asking the tutor
 
@@ -74,16 +79,11 @@ After the outline appears, check **I find this weak or unclear** under any topic
 - When the material doesn't cover the question, the tutor says so and names the missing topic instead of answering from general knowledge.
 - It knows today's study units and the topics you marked as weak, and remembers the last few questions for follow-ups. The caption under the chat shows the model calls and tokens used so far.
 
-### Checking your understanding
+### Checking your understanding each day
 
-The tutor checks what you know at two points. In both, it chooses each question from your earlier answers and shows why, and it reports a confirmed gap only after at least two wrong answers on a unit that outnumber the correct ones; otherwise the conclusion stays uncertain. Questions come from your material.
+After a day's practice, select **Check my understanding**. The tutor reads that day's practice answers and asks up to three more questions about that day's and earlier units, choosing each from your earlier answers and showing why. After every answer you see whether it was right, the correct answer, an explanation, and the supporting passage with a link to its page. It reports a confirmed gap only after at least two wrong answers on a unit that outnumber the correct ones. It then continues, adds a review of today's unit after its remaining study days, or adds a review of an earlier unit; a review already planned later is not added twice.
 
-After every answer you see whether it was right, the correct answer, an explanation, and the passage of your material that supports it, with a link that opens that page beside the check. At the end, **Your answers in this check** lists every question again with its feedback.
-
-- **Initial check (after the outline, before the plan).** Check the topics you find weak in the outline, then select **Start initial check** in the sidebar. The study units are prepared, and the tutor asks up to five questions in place of the outline, starting with the topics you marked and checking whether an earlier unit is the real cause. The plan can't be created until you finish or stop the check. Then set the days and select **Create study plan**: units your answers show to be weak get more of the time, and a marked unit you answered correctly gets no extra time. The check is optional; you can create the plan directly.
-- **Daily check.** After a day's practice, select **Check my understanding**. The tutor reads that day's practice answers and asks up to three more questions about that day's and earlier units. It then continues, adds a review of today's unit after its remaining study days, or adds a review of an earlier unit. A review already planned later is not added twice.
-
-The plan shows your goal, how many days the plan now has, and how many you have checked. When reviews make the plan longer than your goal, it says by how much; you can keep going at your pace or create the plan again with more days. **Plan changes** lists each change and the answers behind it.
+The plan shows your goal, how many days the plan now has, and how many you have checked. When reviews make the plan longer than your goal, it says by how much. **Plan changes** lists each change and the answers behind it.
 
 To try a diagnosis in the terminal instead, run:
 

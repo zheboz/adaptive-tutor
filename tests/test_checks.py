@@ -5,7 +5,7 @@ from unittest.mock import patch
 from tests.test_agent_loop import FakeBank, ScriptedModel, UNITS, question, turn
 from tutor.agent.bank import QuestionBank
 from tutor.agent.loop import Ask, Done, advance, instructions, start_session
-from tutor.agent.replan import after_daily_check, after_initial_check
+from tutor.agent.replan import after_daily_check
 from tutor.agent.state import LearnerState
 from tutor.agent.tools import DAILY_QUESTIONS, Diagnosis, daily_config, initial_config, validate_finish
 from tutor.ui.practice import practice_key
@@ -88,26 +88,6 @@ class FocusAndReplanTests(unittest.TestCase):
         self.assertEqual(self.state.focus_units(), ("unit-2", "unit-3"))
         self.state.flag("unknown")
         self.assertNotIn("unknown", self.state.flagged)
-
-    def test_initial_check_reports_which_units_get_more_time(self):
-        self.state.apply_report(["unit-1"])
-        self.answer("unit-1", True, True)
-        self.answer("unit-2", False, False)
-        weak, change = after_initial_check(self.state, diagnosis("unit-2", "confirmed", "review_gap", ["q3", "q4"]))
-        self.assertEqual(weak, ("unit-2",))
-        self.assertEqual(change.trigger, "Initial check")
-        self.assertIn("Variable updates will get more time (0 of 2 answers correct).", change.message)
-        self.assertIn("Assignment won't get extra time (2 of 2 answers correct).", change.message)
-        self.assertEqual(change.evidence, ("q3", "q4"))
-        # The plan created afterwards gives the weak unit more time.
-        self.assertEqual(self.state.focus_units(), weak)
-
-    def test_initial_check_without_changes_says_so(self):
-        _, change = after_initial_check(self.state, diagnosis())
-        self.assertIn("spread the time evenly", change.message)
-        self.state.apply_report(["unit-3"])
-        _, change = after_initial_check(self.state, diagnosis())
-        self.assertIn("Your answers support the topics you marked", change.message)
 
     def test_daily_check_inserts_a_review_after_the_day(self):
         days = schedule_units(UNITS, 3)

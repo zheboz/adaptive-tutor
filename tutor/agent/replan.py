@@ -26,28 +26,6 @@ def _answers_text(state: LearnerState, unit_id: str) -> str:
     return f"{right} of {len(answers)} answers correct" if answers else "no answers yet"
 
 
-def after_initial_check(state: LearnerState, diagnosis: Diagnosis) -> tuple[tuple[str, ...], PlanChange]:
-    """Record the check's conclusion before planning; return the units the plan should give more time.
-
-    The check runs before the plan exists, so nothing is scheduled here: the units it finds weak
-    get more time when the learner creates the plan.
-    """
-    if diagnosis.primary_gap:
-        state.flag(diagnosis.primary_gap)
-    weak = state.focus_units()
-    reported = [unit_id for unit_id, evidence in state.units.items() if evidence.self_reported]
-
-    def title(unit_id: str) -> str:
-        return state.units[unit_id].unit.title
-
-    parts = [f"{title(u)} will get more time ({_answers_text(state, u)})." for u in weak if u not in reported]
-    parts += [f"{title(u)} won't get extra time ({_answers_text(state, u)})." for u in reported if u not in weak]
-    if not parts:
-        parts = (["Your answers support the topics you marked, so they will get more time."] if weak
-                 else ["No weak unit was found, so the plan will spread the time evenly."])
-    return weak, PlanChange("Initial check", " ".join(parts), diagnosis.evidence)
-
-
 def after_daily_check(
     state: LearnerState, diagnosis: Diagnosis, days: Sequence[StudyDay], day: int,
 ) -> tuple[tuple[StudyDay, ...], PlanChange | None]:
