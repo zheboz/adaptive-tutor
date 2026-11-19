@@ -1,6 +1,6 @@
 # Adaptive Tutor
 
-Adaptive Tutor turns a PDF into a study outline, a daily plan, and checks whose questions link to their source pages. Upload lecture notes, generate an outline, and choose how many days to spend on the material. Each study day includes the option to practice what was assigned.
+Adaptive Tutor turns a PDF into a study outline, a daily plan, and checks whose questions link to their source pages. Upload lecture notes, generate an outline, and choose how many days to spend on the material. After each study day, a check asks questions from that day's pages.
 
 The planned tutoring workflow will use the learner’s goals, deadline, and answers to schedule study sessions. The first course will cover variable updates, loop counts, and loop tracing in Python.
 
@@ -27,7 +27,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-The outline, planning, and practice features use the OpenAI SDK and read `OPENAI_API_KEY` from the server process environment. With the key already exported, start the app from the project root:
+The outline, planning, quiz, check and tutor features use the OpenAI SDK and read `OPENAI_API_KEY` from the server process environment. With the key already exported, start the app from the project root:
 
 ```bash
 python -m streamlit run app.py
