@@ -1,7 +1,13 @@
-"""OpenAI Responses client for typed model outputs."""
+"""OpenAI Responses client for typed model outputs and tool calls, with per-call tracing."""
 
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+import json
 import os
-from typing import TypeVar
+import time
+from typing import Any, TypeVar
 
 from openai import (
     APIConnectionError,
@@ -22,34 +28,160 @@ class LLMError(RuntimeError):
     """A model request failed; the message is safe to show to the learner."""
 
 
-def generate_structured(*, instructions: str, content: str, schema: type[T]) -> T:
-    """Request a validated model result using credentials in the process environment."""
+@dataclass
+class Span:
+    """One model call or tool call within a run."""
+
+    name: str
+    seconds: float
+    input_tokens: int = 0
+    output_tokens: int = 0
+    detail: str = ""
+    error: str | None = None
+
+
+@dataclass
+class Trace:
+    """The spans of one run, such as one diagnosis session."""
+
+    spans: list[Span] = field(default_factory=list)
+
+    @property
+    def model_calls(self) -> int:
+        return sum(span.name.startswith("model:") for span in self.spans)
+
+    @property
+    def total_tokens(self) -> int:
+        return sum(span.input_tokens + span.output_tokens for span in self.spans)
+
+    @property
+    def model_seconds(self) -> float:
+        return sum(span.seconds for span in self.spans if span.name.startswith("model:"))
+
+
+_active_trace: ContextVar[Trace | None] = ContextVar("active_trace", default=None)
+
+
+@contextmanager
+def tracing(trace: Trace) -> Iterator[Trace]:
+    """Record every model call made inside the block, including calls in nested helpers."""
+    token = _active_trace.set(trace)
+    try:
+        yield trace
+    finally:
+        _active_trace.reset(token)
+
+
+def record_span(span: Span) -> None:
+    trace = _active_trace.get()
+    if trace is not None:
+        trace.spans.append(span)
+
+
+def _safe_error(exc: Exception) -> LLMError | None:
+    """Translate SDK failures without exposing request content or provider details."""
+    if isinstance(exc, AuthenticationError):
+        return LLMError("OpenAI rejected the credentials. Check the app's API key.")
+    if isinstance(exc, RateLimitError):
+        return LLMError("OpenAI reported a usage limit. Check your quota or try again later.")
+    if isinstance(exc, APIConnectionError):
+        return LLMError("Could not reach OpenAI. Check your connection and try again.")
+    if isinstance(exc, APIStatusError):
+        return LLMError(f"OpenAI returned HTTP {exc.status_code}. Check model access or retry later.")
+    if isinstance(exc, ValidationError):
+        return LLMError("The model returned data that did not match the requested format.")
+    if isinstance(exc, (OpenAIError, ValueError)):
+        return LLMError("The OpenAI request failed. Check the model configuration and retry.")
+    return None
+
+
+def _request(name: str, send: Callable[[OpenAI, str], Any]) -> Any:
+    """Send one request with credentials from the process environment and record its span."""
     if not os.environ.get("OPENAI_API_KEY"):
         raise LLMError("Set OPENAI_API_KEY in the app environment before using the model.")
     model = os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
+    start = time.perf_counter()
     try:
         with OpenAI(base_url="https://api.openai.com/v1", timeout=60.0, max_retries=1) as client:
-            response = client.responses.parse(
-                model=model,
-                instructions=instructions,
-                input=content,
-                text_format=schema,
-                store=False,
-            )
-    except AuthenticationError:
-        raise LLMError("OpenAI rejected the credentials. Check the app's API key.") from None
-    except RateLimitError:
-        raise LLMError("OpenAI reported a usage limit. Check your quota or try again later.") from None
-    except APIConnectionError:
-        raise LLMError("Could not reach OpenAI. Check your connection and try again.") from None
-    except APIStatusError as exc:
-        raise LLMError(f"OpenAI returned HTTP {exc.status_code}. Check model access or retry later.") from None
-    except ValidationError:
-        raise LLMError("The model returned data that did not match the requested format.") from None
-    except (OpenAIError, ValueError):
-        raise LLMError("The OpenAI request failed. Check the model configuration and retry.") from None
+            response = send(client, model)
+    except Exception as exc:
+        error = _safe_error(exc)
+        if error is None:
+            raise
+        record_span(Span(name, time.perf_counter() - start, error=str(error)))
+        raise error from None
+    usage = getattr(response, "usage", None)
+    record_span(Span(
+        name, time.perf_counter() - start,
+        input_tokens=getattr(usage, "input_tokens", 0) or 0,
+        output_tokens=getattr(usage, "output_tokens", 0) or 0,
+    ))
+    return response
 
+
+def generate_structured(*, instructions: str, content: str, schema: type[T]) -> T:
+    """Request a validated model result using credentials in the process environment."""
+    response = _request(f"model:{schema.__name__}", lambda client, model: client.responses.parse(
+        model=model,
+        instructions=instructions,
+        input=content,
+        text_format=schema,
+        store=False,
+    ))
     result = response.output_parsed
     if response.status != "completed" or not isinstance(result, schema):
         raise LLMError("The model did not return a complete result in the requested format.")
     return result
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    call_id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ToolTurn:
+    """The tools the model chose, and the output items to append to the conversation."""
+
+    calls: tuple[ToolCall, ...]
+    items: tuple[dict[str, Any], ...]
+
+
+def call_with_tools(
+    *, instructions: str, items: Sequence[dict[str, Any]], tools: Sequence[dict[str, Any]], name: str = "model:agent",
+) -> ToolTurn:
+    """Ask the model for exactly one tool call. Nothing is stored by OpenAI between turns."""
+    response = _request(name, lambda client, model: client.responses.create(
+        model=model,
+        instructions=instructions,
+        input=list(items),
+        tools=list(tools),
+        tool_choice="required",
+        parallel_tool_calls=False,
+        store=False,
+    ))
+    if response.status != "completed":
+        raise LLMError("The model did not return a complete result.")
+    calls = []
+    output = []
+    for item in response.output:
+        if item.type == "function_call":
+            try:
+                arguments = json.loads(item.arguments or "{}")
+            except json.JSONDecodeError:
+                raise LLMError("The model returned tool arguments that were not valid JSON.") from None
+            if not isinstance(arguments, dict):
+                raise LLMError("The model returned tool arguments in an unexpected format.")
+            calls.append(ToolCall(item.call_id, item.name, arguments))
+            output.append({
+                "type": "function_call", "call_id": item.call_id, "name": item.name, "arguments": item.arguments,
+            })
+        elif item.type == "message":
+            text = "".join(getattr(part, "text", "") for part in item.content)
+            if text:
+                output.append({"role": "assistant", "content": text})
+    if not calls:
+        raise LLMError("The model did not choose a tool.")
+    return ToolTurn(tuple(calls), tuple(output))

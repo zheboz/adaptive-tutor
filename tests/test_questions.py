@@ -200,3 +200,10 @@ class PracticeQuestionTests(unittest.TestCase):
         result, = generate_questions(self.assignment, self.passages)
         self.assertEqual(result.prompt, self.generated.prompt)
         self.assertEqual(self.generate.call_count, 2)
+
+    def test_a_diagnosis_can_ask_for_several_questions(self):
+        self.generate.return_value = QuestionBatch(questions=[self.generated])
+        generate_questions(self.assignment, self.passages, questions_wanted=3)
+        self.assertEqual(json.loads(self.generate.call_args.kwargs["content"])["questions_wanted"], 3)
+        generate_questions(self.assignment, self.passages)
+        self.assertNotIn("questions_wanted", json.loads(self.generate.call_args.kwargs["content"]))

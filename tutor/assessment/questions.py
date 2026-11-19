@@ -83,7 +83,9 @@ true/false exercise, use origin=pdf, copy the stem and all choices verbatim in t
 (omit option letters). Preserve necessary setup or code. If the original requires a missing figure,
 table or unsupported context, do not use it. For a relevant free-response exercise, adapt it to a
 supported format and mark it adapted. Only fill gaps using origin=generated when the source
-exercises do not adequately cover today's assignment. An adequate single question is enough.
+exercises do not adequately cover today's assignment. An adequate single question is enough, unless
+questions_wanted is given: then write that many distinct questions, each on a different learning
+point or printed exercise, as far as the reading supports them.
 For a multiple-choice question provide 2–6 distinct options; for true/false give the statement
 and standard opposing labels (True/False, 正确/错误 or their equivalents). Do not put the answer
 or an answer key into the prompt or options. Use a zero-based correct_index and explain why it
@@ -272,6 +274,7 @@ def _assigned_reading(assignment: StudyAssignment, passages: Sequence[Passage],
 
 def _model_questions(
     assignment: StudyAssignment, passages: Sequence[Passage], assigned_reading: Sequence[Passage] | None = None,
+    questions_wanted: int | None = None,
 ) -> tuple[Question, ...]:
     """Verify each item and retry rejected items once while preserving accepted questions."""
     scope = set(assignment.source_ids)
@@ -302,6 +305,9 @@ def _model_questions(
             for p in shown
         ],
     }
+    if questions_wanted:
+        # A diagnosis needs several independent answers per unit to tell a gap from a slip.
+        context["questions_wanted"] = max(1, min(5, questions_wanted))
 
     verified: dict[str, Question] = {}
     origins = ("pdf", "adapted", "generated")
@@ -358,16 +364,18 @@ def _model_questions(
 
 def generate_questions(
     assignment: StudyAssignment, passages: Sequence[Passage], *, assigned_reading: Sequence[Passage] | None = None,
+    questions_wanted: int | None = None,
 ) -> tuple[Question, ...]:
     """Use verified model results, or build a check directly from the assigned reading.
 
     ``passages`` are the retrieved excerpts shown to the model. ``assigned_reading`` is every
     passage on the assignment's pages; it defaults to the retrieved passages on those pages.
+    ``questions_wanted`` asks for several questions when one is not enough, as in a diagnosis.
     """
     from .extractive import build_reading_check
 
     try:
-        return _model_questions(assignment, passages, assigned_reading)
+        return _model_questions(assignment, passages, assigned_reading, questions_wanted)
     except InsufficientEvidence:
         # Nothing on these pages should be assessed, so do not build a fallback question either.
         raise

@@ -59,6 +59,20 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 2. The app indexes readable PDF passages locally and ranks them with BM25. It retrieves passages from the assigned pages and looks elsewhere in the same document for related exercises, including chapter-end questions. OpenAI uses these excerpts to reuse, adapt, or write questions. Each question links to its source pages and shows its origin.
 3. Select an option and click **Check answer** to see feedback and the source of the answer. The app distinguishes a verified PDF answer key, an answer taken directly from the assigned reading, and a model reference answer. If model drafts fail validation, the app can use a clearly keyed exercise or build a fill-in-the-blank check from a numeric value in a relevant sentence on the assigned pages. When neither is available, the day shows that the reading had too little evidence for practice. Pages that teach nothing to assess, such as a title slide, an agenda, course logistics or references, get no practice: the app skips them when it finds no teaching point or exercise, and the model can also decline them. Either way the plan shows the reason. Questions and submitted answers follow the same unit and cited pages when you change days or adjust the schedule. They are kept in the current PDF session.
 
+### Telling the tutor what is unclear
+
+After you create a study plan, use **What's unclear?** in the sidebar to select units you don't understand and, optionally, describe the difficulty in a sentence. The tutor matches the sentence to units in your material and tells you when it describes something the material doesn't cover. **Learning status** shows each unit's status and the evidence behind it. A report alone only marks a unit as suspected; answers decide whether it is understood or a likely gap, and practice answers count as evidence.
+
+### Diagnosing a difficulty (command line)
+
+The diagnosis agent is not in the web app yet. To try it on a PDF, run it in the terminal with the same environment as the app:
+
+```bash
+uv run --no-project --env-file .env -- .venv/bin/python -m tutor.agent.cli path/to/lesson.pdf --trace
+```
+
+The tutor builds the study units, asks which units are unclear, then asks up to five questions from your material. It chooses each question from your earlier answers and shows why. It reports a confirmed gap only after at least two wrong answers on that unit; otherwise its conclusion stays uncertain. `--trace` lists every model call and tool step with its time and tokens.
+
 ## Planned architecture
 
 | Component | Responsibility |
