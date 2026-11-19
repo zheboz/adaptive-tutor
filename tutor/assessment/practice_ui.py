@@ -19,13 +19,15 @@ def practice_key(document_id: str, assignment: StudyAssignment) -> str:
 
 def prepare_daily_practice(scopes: list[tuple[str, StudyAssignment]], pages: list[PdfPage]) -> None:
     saved = st.session_state.setdefault("practice_sets", {})
-    missing = [(key, assignment) for key, assignment in scopes if key not in saved]
+    # A tuple is a completed result (empty when the reading has no supported
+    # concept). A string records a failed attempt and leaves that item retryable.
+    missing = [(key, assignment) for key, assignment in scopes if not isinstance(saved.get(key), tuple)]
     if not missing:
         return
     action = st.empty()
     if not action.button(
         "Generate daily practice",
-        help="Find textbook exercises and prepare 1–5 questions for each learning item on this day.",
+        help="Prepare 1–5 questions for each learning item with evidence in the assigned reading.",
     ):
         return
     if "practice_index" not in st.session_state:
@@ -33,14 +35,22 @@ def prepare_daily_practice(scopes: list[tuple[str, StudyAssignment]], pages: lis
     for key, assignment in missing:
         try:
             with st.spinner(f"Preparing practice for {assignment.unit.title}…"):
-                passages = retrieval.retrieve(st.session_state.practice_index, assignment)
-                saved[key] = questions.generate_questions(assignment, passages)
-        except questions.PracticeError as error:
-            st.error(str(error))
+                index = st.session_state.practice_index
+                passages = retrieval.retrieve(index, assignment)
+                pages_in_scope = set(assignment.source_ids)
+                assigned_reading = [passage for passage in index.passages if passage.source_id in pages_in_scope]
+                saved[key] = questions.generate_questions(assignment, passages, assigned_reading=assigned_reading)
+        except questions.InsufficientEvidence as reason:
+            saved[key] = ()
+            st.session_state.setdefault("practice_skips", {})[key] = str(reason)
+        except questions.PracticeError:
+            saved[key] = (
+                f"The tutor couldn't verify a question for {assignment.unit.title} against the PDF. "
+                "Select Generate daily practice to try again."
+            )
         except LLMError as error:
-            st.error(str(error))
-            break
-    if all(key in saved for key, _ in missing):
+            saved[key] = f"The practice request for {assignment.unit.title} failed. {error}"
+    if all(isinstance(saved.get(key), tuple) for key, _ in missing):
         action.empty()
 
 
@@ -51,8 +61,17 @@ def _record_answer(answer_key: str, widget_key: str, options: tuple[str, ...]) -
 
 
 def render_questions(scope: str) -> None:
-    exercises = st.session_state.practice_sets.get(scope, ())
+    exercises = st.session_state.practice_sets.get(scope)
+    if exercises is None:
+        return
+    if isinstance(exercises, str):
+        st.error(exercises)
+        return
     if not exercises:
+        reason = st.session_state.get("practice_skips", {}).get(
+            scope, "The tutor couldn't find enough evidence for a practice question on the assigned pages."
+        )
+        st.info(f"No practice for this item. {reason}")
         return
     answers = st.session_state.setdefault("practice_answers", {})
     origins = {"pdf": "From PDF", "adapted": "Adapted from PDF", "generated": "Generated from PDF"}
@@ -79,6 +98,8 @@ def render_questions(scope: str) -> None:
             else:
                 st.warning("Incorrect.")
                 st.text(f"Correct answer: {question.options[question.correct_index]}")
-            st.caption("PDF answer key" if question.answer_origin == "pdf" else "Model reference answer")
+            answer_sources = {"pdf": "PDF answer key", "reference": "Model reference answer",
+                              "reading": "Answer from the assigned reading"}
+            st.caption(answer_sources[question.answer_origin])
             st.text(question.explanation)
         render_sources(question.source_ids, answer_key)

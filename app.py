@@ -15,7 +15,7 @@ def reset_preview() -> None:
     for key in (
         "pdf_pages", "pdf_page_number", "study_outline", "unit_plan", "study_units",
         "study_plan", "study_target_days", "planned_days", "study_day",
-        "practice_index", "practice_sets", "practice_answers",
+        "practice_index", "practice_sets", "practice_answers", "practice_skips",
     ):
         st.session_state.pop(key, None)
 

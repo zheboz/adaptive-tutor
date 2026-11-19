@@ -61,6 +61,11 @@ def _terms(text: str) -> Iterator[str]:
                 yield run
 
 
+def topical_overlap(first: str, second: str) -> int:
+    """Count shared content terms using the same tokenizer as the retrieval index."""
+    return len(set(_terms(first)).intersection(_terms(second)))
+
+
 def _chunks(text: str) -> Iterator[str]:
     start = 0
     while start < len(text):

@@ -6,6 +6,7 @@ from streamlit.testing.v1 import AppTest
 from tests.test_outline_ui import upload
 from tests.test_pdf_preview import APP, button, previewed_pdf
 from tests.test_planning_ui import create_plan, document_row, visible_text
+from tutor.assessment import questions
 from tutor.assessment.questions import Question
 from tutor.llm import LLMError
 from tutor.materials.outline import Outline, Topic
@@ -14,7 +15,7 @@ from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
 
 def practice_text(app):
     panel = app.main.container("plan_panel")
-    feedback = [item.value for group in (panel.success, panel.warning, panel.error) for item in group]
+    feedback = [item.value for group in (panel.success, panel.warning, panel.error, panel.info) for item in group]
     return "\n".join([visible_text(panel), *(radio.label for radio in panel.radio), *feedback])
 
 
@@ -110,6 +111,51 @@ class PracticeUITests(unittest.TestCase):
         self.assertIn(self.iteration.prompt, practice_text(self.app))
         self.assertEqual([call.args[0].unit.title for call in self.generate.call_args_list],
                          ["Assignment", "Iteration", "Iteration"])
+
+    def test_insufficient_material_is_separate_from_a_retryable_verification_error(self):
+        self.generate.side_effect = [
+            questions.InsufficientEvidence("The page is only an agenda."), questions.PracticeError("Unverifiable citation."),
+            (self.iteration,),
+        ]
+        create_plan(self.app, 1)
+        self.generate_daily()
+        panel = self.app.main.container("plan_panel")
+        self.assertEqual(len(panel.error), 1)
+        self.assertIn("verify a question for Iteration", panel.error[0].value)
+        self.assertEqual(len(panel.info), 1)
+        self.assertEqual(panel.info[0].value, "No practice for this item. The page is only an agenda.")
+        self.app.run()
+        self.assertIn("verify a question for Iteration", practice_text(self.app))
+        self.generate_daily()
+        panel = self.app.main.container("plan_panel")
+        self.assertFalse(panel.error)
+        self.assertTrue(panel.info)
+        self.assertNotIn("Generate daily practice", [widget.label for widget in panel.button])
+        self.assertIn(self.iteration.prompt, practice_text(self.app))
+        self.assertEqual([call.args[0].unit.title for call in self.generate.call_args_list],
+                         ["Assignment", "Iteration", "Iteration"])
+
+    def test_request_failure_names_the_item_and_other_items_can_succeed(self):
+        self.generate.side_effect = [LLMError("Could not reach OpenAI."), (self.iteration,), (self.assignment,)]
+        create_plan(self.app, 1)
+        self.generate_daily()
+        self.assertIn("request for Assignment failed. Could not reach OpenAI.", practice_text(self.app))
+        self.assertIn(self.iteration.prompt, practice_text(self.app))
+        self.generate_daily()
+        self.assertFalse(self.app.main.container("plan_panel").error)
+        self.assertEqual([call.args[0].unit.title for call in self.generate.call_args_list],
+                         ["Assignment", "Iteration", "Assignment"])
+
+    def test_the_full_assigned_reading_remains_available_after_retrieval(self):
+        self.generate.side_effect = [(self.assignment,), (self.iteration,)]
+        create_plan(self.app, 1)
+        with patch("tutor.assessment.retrieval.retrieve", return_value=()):
+            self.generate_daily()
+        seen = []
+        for call in self.generate.call_args_list:
+            self.assertEqual(call.args[1], ())
+            seen.append([p.source_id for p in call.kwargs["assigned_reading"]])
+        self.assertEqual(seen, [["p1"], ["p2"]])
 
     def test_reading_different_pages_of_one_unit_has_different_practice(self):
         self.planner.side_effect = [
