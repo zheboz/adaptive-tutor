@@ -43,12 +43,12 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 
 ### Page layout
 
-A step bar at the top shows where you are (Upload › Outline › Mark & quiz › Plan › Study) and what to do next. The PDF stays on the left, with the text read from the current page in a collapsed **Extracted text** section below it. On the right, a row of views:
+A step bar at the top shows where you are (Upload › Outline › Mark & quiz › Plan › Study) and what to do next. The PDF stays on the left, with its page controls in a row above it; on the right, a row of views sits level with those controls, above a panel of the same height:
 
 - Before the plan: **Outline** (check the topics you don't understand), **Initial quiz** and **Progress**.
 - After the plan: **Today** (the open study day and its check), **Plan** (goal, length and checked days, every day in a table, plan changes and the outline) and **Progress** (each unit's status and the initial quiz answers).
 
-**Ask the tutor** is below the PDF and the views, across the full width.
+**Ask the tutor** is below the PDF and the views, across the full width. The text read from the current page is in a collapsed **Extracted text** section at the bottom of the page.
 
 Days are picked from a row of buttons: ✓ marks a checked day and ↻ a review day. Page links in any view open the page in the PDF beside it. The app switches to the quiz when it starts and to Today when a plan is created.
 

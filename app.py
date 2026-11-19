@@ -135,7 +135,7 @@ def render_views(result: outline.Outline | None, pages: list[PdfPage], has_plan:
     Ask the tutor is below both, across the full width."""
     units = st.session_state.get("study_units")
     if result is None:
-        st.header("Study outline")
+        navigation.render_view_bar(["Outline"])
         with st.container(height=READER_PANEL_HEIGHT, border=True, key="outline_panel"):
             st.caption("Select Generate outline in the sidebar to see the topics and their source pages.")
         return
@@ -208,14 +208,15 @@ def main() -> None:
         ensure_plan()
     views.render_steps(*current_step(result, has_plan))
     preview_column, learning_column = st.columns([3, 2], gap=12)
+    # Both columns open with a row of controls above a panel of the same height, so they line up.
     with preview_column:
         page = render_pdf_preview(upload, pages)
-        render_extracted_text(page)
     with learning_column:
         render_views(result, pages, has_plan)
     if result is not None:
         st.header("Ask the tutor")
         tutor_chat.render_tutor_chat(pages, tutor_context(result), 360)
+    render_extracted_text(page)
 
 
 if __name__ == "__main__":

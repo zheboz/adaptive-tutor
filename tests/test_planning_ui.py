@@ -83,7 +83,18 @@ class PlanningUITests(unittest.TestCase):
         self.assertIn("Ask the tutor", [h.value for h in app.main.header])
         self.assertIn("Update a variable", visible_text(right.container("outline_panel")))
         self.assertIn("**3 · Mark & quiz**", app.main.container("steps").markdown[0].value)
-        # The extracted text sits in a collapsed section under the PDF.
+        # Each column opens with a row of controls above a panel of the same height, so they line up.
+        left_blocks = [b.key for b in left.children.values() if getattr(b, "key", None)]
+        self.assertEqual(left_blocks[:2], ["pdf_page_controls", "pdf_preview_panel"])
+        first_right = list(right.children.values())[0]
+        self.assertEqual(getattr(first_right, "key", None) or first_right.type, "right_view")
+        heights = {left.container("pdf_preview_panel").proto.height_config.pixel_height,
+                   right.container("outline_panel").proto.height_config.pixel_height}
+        self.assertEqual(len(heights), 1)
+        # The extracted text is a collapsed section at the bottom of the page, after Ask the tutor.
+        order = [getattr(block, "label", None) or getattr(block, "value", None)
+                 for block in app.main.children.values()]
+        self.assertTrue(str(order[-1]).startswith("Extracted text"))
         (extracted,) = [e for e in app.main.expander if e.label.startswith("Extracted text")]
         self.assertEqual(extracted.label, "Extracted text · page 1")
         self.assertEqual(app.main.container("extracted_text_panel").code[0].value.strip(), "Variable updates")
