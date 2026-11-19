@@ -103,17 +103,13 @@ def _apply(check: dict[str, Any]) -> None:
     if check["applied"]:
         return
     day = check["day"]
-    before = st.session_state.study_plan
-    days, change = after_daily_check(check["session"].state, check["step"].diagnosis, before, day)
+    session = check["session"]
+    days, change = after_daily_check(session.state, check["step"].diagnosis, st.session_state.study_plan, day,
+                                     session.asked)
+    # A review is added at the end, so no day moves.
     st.session_state.study_plan = days
-    done = completed_days()
-    if len(days) > len(before):
-        # Days after the inserted review move back by one.
-        shifted = {number + 1 if number > day else number for number in done}
-        done.clear()
-        done.update(shifted)
-    done.add(day)
-    if change is not None:
+    completed_days().add(day)
+    if change is not None and change.changed:
         plan_changes().append(change)
     check["change"] = change
     check["applied"] = True
@@ -207,8 +203,11 @@ def render_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> bool:
     evidence = _evidence_line(check)
     if evidence:
         st.caption(f"Based on: {evidence}")
-    if check["change"] is not None:
-        st.info(f"Plan change · {check['change'].message}")
+    change = check["change"]
+    if change is not None and change.changed:
+        st.info(f"Plan change · {change.message}")
+    elif change is not None:
+        st.caption(change.message)
     else:
         st.caption("The plan is unchanged.")
     if answered:

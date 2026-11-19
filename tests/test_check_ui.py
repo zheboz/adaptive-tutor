@@ -23,8 +23,8 @@ def mc(title, letter):
                     evidence_source_id=page)
 
 
-def two_questions(assignment, *args, **kwargs):
-    return mc(assignment.unit.title, "A"), mc(assignment.unit.title, "B")
+def three_questions(assignment, *args, **kwargs):
+    return mc(assignment.unit.title, "A"), mc(assignment.unit.title, "B"), mc(assignment.unit.title, "C")
 
 
 def qid(unit_id, n):
@@ -44,7 +44,7 @@ class CheckUITests(unittest.TestCase):
                             for n, t in enumerate(topics, 1)]),
         ]
         self.generate = self.enterContext(
-            patch("tutor.assessment.questions.generate_questions", side_effect=two_questions))
+            patch("tutor.assessment.questions.generate_questions", side_effect=three_questions))
         self.model = ScriptedModel()
         self.enterContext(patch("tutor.agent.loop.call_with_tools", side_effect=self.model))
         self.app = AppTest.from_file(APP, default_timeout=10).run()
@@ -95,12 +95,13 @@ class CheckUITests(unittest.TestCase):
         self.assertIn("Day 1 · checked", [s.value for s in self.panel().subheader])
         self.assertIn("1 checked · 2 to go", self.text())
 
-        # Day 2: two wrong answers, each with feedback, lead to a review day.
+        # Day 2: two wrong answers and one right one add no review.
         self.app.number_input(key="study_day").set_value(2).run()
         self.model.turns += [
             turn("ask_question", 3, unit_id="unit-2", reason="Check updates."),
             turn("ask_question", 4, unit_id="unit-2", reason="Once more."),
-            turn("finish", 5, primary_gap="unit-2", status="confirmed",
+            turn("ask_question", 5, unit_id="unit-2", reason="A third time."),
+            turn("finish", 6, primary_gap="unit-2", status="confirmed",
                  evidence=[qid("unit-2", 1), qid("unit-2", 2)], next_step="review_today",
                  summary="x = x + 1 is not clear yet."),
         ]
@@ -110,16 +111,36 @@ class CheckUITests(unittest.TestCase):
         self.assertIn("Question 1 · Updates: Not quite.", text)
         self.assertIn("Correct answer: 2", text)
         self.answer(qid("unit-2", 2), "3")
+        self.answer(qid("unit-2", 3), "2")
         text = self.text()
-        self.assertIn("Added a review of Updates as day 3", text)
-        self.assertIn("Your answers in this check (2)", [e.label for e in self.panel().expander])
+        self.assertIn("No review was added: 2 of 3 answers in this check were wrong", text)
+        self.assertNotIn("Plan change", text)
+        button(self.panel(), "Continue").click().run()
+        self.assertIn("plan: 3 study days · 2 checked · 1 to go", self.text())
+
+        # Day 3: three wrong answers add a review at the end of the plan.
+        self.app.number_input(key="study_day").set_value(3).run()
+        self.model.turns += [
+            turn("ask_question", 7, unit_id="unit-3", reason="Check loops."),
+            turn("ask_question", 8, unit_id="unit-3", reason="Again."),
+            turn("ask_question", 9, unit_id="unit-3", reason="Last one."),
+            turn("finish", 10, primary_gap="unit-3", status="confirmed",
+                 evidence=[qid("unit-3", 1), qid("unit-3", 2)], next_step="review_today",
+                 summary="Loop counting is not clear yet."),
+        ]
+        button(self.panel(), "Check my understanding").click().run()
+        for n in (1, 2, 3):
+            self.answer(qid("unit-3", n), "4")
+        text = self.text()
+        self.assertIn("Added a review of Loops as day 4, at the end of the plan", text)
+        self.assertIn("Your answers in this check (3)", [e.label for e in self.panel().expander])
         button(self.panel(), "Continue").click().run()
         text = self.text()
-        self.assertIn("plan: 4 study days · 2 checked · 2 to go", text)
+        self.assertIn("plan: 4 study days · 3 checked · 1 to go", text)
         self.assertIn("The plan now needs 4 days, 1 more than your goal", text)
         self.assertIn("Plan changes (1)", [e.label for e in self.panel().expander])
-        self.app.number_input(key="study_day").set_value(3).run()
-        self.assertIn("Review · Updates", visible_text(self.panel()))
+        self.app.number_input(key="study_day").set_value(4).run()
+        self.assertIn("Review · Loops", visible_text(self.panel()))
 
     def test_a_day_with_nothing_to_ask_says_why(self):
         self.generate.side_effect = InsufficientEvidence("The assigned pages have no teaching point to assess.")
@@ -135,7 +156,7 @@ class CheckUITests(unittest.TestCase):
         self.generate.side_effect = LLMError("Could not reach OpenAI.")
         button(self.panel(), "Check my understanding").click().run()
         self.assertIn("Could not reach OpenAI.", self.text())
-        self.generate.side_effect = two_questions
+        self.generate.side_effect = three_questions
         self.model.turns += [turn("ask_question", 1, unit_id="unit-1", reason="Start.")]
         button(self.panel(), "Try again").click().run()
         self.assertIn("Why this question: Start.", self.text())

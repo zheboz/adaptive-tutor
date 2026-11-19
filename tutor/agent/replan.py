@@ -13,11 +13,17 @@ from .state import LearnerState
 from .tools import Diagnosis
 
 
+# A check adds a review day only when at least this many of its own answers are wrong.
+REVIEW_MIN_WRONG = 3
+
+
 @dataclass(frozen=True)
 class PlanChange:
     trigger: str
     message: str
     evidence: tuple[str, ...] = ()
+    # False when the message explains why the plan was left as it was.
+    changed: bool = True
 
 
 def _answers_text(state: LearnerState, unit_id: str) -> str:
@@ -27,9 +33,13 @@ def _answers_text(state: LearnerState, unit_id: str) -> str:
 
 
 def after_daily_check(
-    state: LearnerState, diagnosis: Diagnosis, days: Sequence[StudyDay], day: int,
+    state: LearnerState, diagnosis: Diagnosis, days: Sequence[StudyDay], day: int, asked: Sequence[str] = (),
 ) -> tuple[tuple[StudyDay, ...], PlanChange | None]:
-    """Add a review day when the check calls for one, after the unit's remaining study days."""
+    """Add a review day at the end of the plan when the check calls for one.
+
+    `asked` are the questions of this check. With fewer than REVIEW_MIN_WRONG of them answered
+    wrong, no review is added, whatever the tutor concluded.
+    """
     days = tuple(days)
     if diagnosis.primary_gap:
         state.flag(diagnosis.primary_gap)
@@ -44,20 +54,25 @@ def after_daily_check(
         rank = {"gap": 0, "uncertain": 1, "suspected": 2, "untested": 3, "mastered": 4}
         unit = min(today, key=lambda u: rank[state.status(u.unit_id)])
     trigger = f"Day {day} check"
-    later = [d.number for d in days[day:] if any(a.unit.unit_id == unit.unit_id for a in d.assignments)]
+    answers = [state.answer(question_id) for question_id in asked]
+    wrong = sum(answer is not None and not answer.correct for answer in answers)
+    if wrong < REVIEW_MIN_WRONG:
+        return days, PlanChange(
+            trigger, f"No review was added: {wrong} of {len(asked)} answers in this check were wrong, and a "
+                     f"review is added only after {REVIEW_MIN_WRONG} wrong answers.",
+            diagnosis.evidence, changed=False,
+        )
     planned = [d.number for d in days[day:]
                if any(a.unit.unit_id == unit.unit_id and a.kind == "review" for a in d.assignments)]
     if planned:
         return days, PlanChange(trigger, f"A review of {unit.title} is already planned for day {planned[0]}, "
-                                         "so no day was added.", diagnosis.evidence)
+                                         "so no day was added.", diagnosis.evidence, changed=False)
 
-    # Review after the unit's remaining study days, so its reading and task come first.
-    after = later[-1] if later else day
-    updated = insert_review(days, after, unit)
+    updated = insert_review(days, len(days), unit)
     if diagnosis.next_step == "revisit_earlier":
         why = "your answers suggest today's difficulty comes from this earlier unit"
     else:
         why = "today's answers show it needs another session"
-    message = (f"Added a review of {unit.title} as day {after + 1}: {why} "
-               f"({_answers_text(state, unit.unit_id)}). Later days move back by one.")
+    message = (f"Added a review of {unit.title} as day {len(updated)}, at the end of the plan: {why} "
+               f"({_answers_text(state, unit.unit_id)}).")
     return updated, PlanChange(trigger, message, diagnosis.evidence)

@@ -60,7 +60,7 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
    - With topics checked, there is one question for each checked topic, in the order you checked them. Each question is built from that topic's own pages.
    - With nothing checked, up to three questions come from topics spread across the whole material.
 3. Answer every question and select **Submit answers**. Only then do you see whether each answer was right, the correct answer, an explanation, and the passage of your material that supports it, with a link that opens that page.
-4. The plan controls appear after the results. Set the number of days and select **Create study plan**. Topics you checked, and topics you answered wrong, get more of the time: in a short plan their units share a day with fewer other units; in a long plan they get extra reading days first and a review day.
+4. The plan controls appear after the results. Set the number of days and select **Create study plan**. Topics you checked, and topics you answered wrong, get more of the time: in a short plan their units share a day with fewer other units; in a long plan they get extra reading days first and a review day at the end of the plan.
 
 **Learning status** shows each unit's status and the evidence behind it. To ask about something specific you don't understand, use **Ask the tutor**.
 
@@ -77,7 +77,7 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 
 Study a day's readings and task, then select **Check my understanding** at the bottom of the day. Only then are questions prepared, from that day's pages alone; a review day gets fresh questions. When the day's pages have nothing the tutor can ask about, it says so for each unit and leaves the plan unchanged.
 
-Otherwise the tutor asks up to three questions, choosing each from your earlier answers and showing why. After every answer you see whether it was right, the correct answer, an explanation, and the supporting passage with a link to its page; at the end every answer is listed again. It reports a confirmed gap only after at least two wrong answers on a unit that outnumber the correct ones. It then continues, adds a review of today's unit after its remaining study days, or, when your earlier answers show the cause is an earlier unit, adds a review of that unit. A review already planned later is not added twice.
+Otherwise the tutor asks up to three questions, choosing each from your earlier answers and showing why. After every answer you see whether it was right, the correct answer, an explanation, and the supporting passage with a link to its page; at the end every answer is listed again. It reports a confirmed gap only after at least two wrong answers on a unit that outnumber the correct ones. A review day is added only when at least three answers in the check are wrong; with one or two wrong, the check says so and the plan stays as it is. A review goes at the end of the plan, for today's unit or, when your earlier answers show the cause is an earlier unit, for that unit. A review already planned is not added twice.
 
 The plan shows your goal, how many days the plan now has, and how many you have checked. When reviews make the plan longer than your goal, it says by how much. **Plan changes** lists each change and the answers behind it.
 

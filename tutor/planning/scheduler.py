@@ -2,7 +2,8 @@
 
 Units the learner marked as weak get more of the time. In a short plan they count double when
 units share days. In a long plan the extra days go first to their reading days, then to a review
-day for each, and only then to other units. Without weak units the plan is spread evenly.
+day for each, and only then to other units. Review days come at the end of the plan, after all the
+units. Without weak units the plan is spread evenly.
 """
 
 from collections.abc import Collection, Iterator, Sequence
@@ -125,15 +126,16 @@ def schedule_units(
     give_reading_days(other_indices)
 
     assignments = []
-    for index, (whole, count) in enumerate(zip(whole_units, reading_days, strict=True)):
+    for whole, count in zip(whole_units, reading_days, strict=True):
         if count == 0:
             assignments.append(whole)
         else:
             for pages in _groups(whole.source_ids, count):
                 assignments.append(StudyAssignment(whole.unit, "read", pages))
             assignments.append(StudyAssignment(whole.unit, "apply", whole.source_ids))
-        if index in reviews:
-            assignments.append(StudyAssignment(whole.unit, "review", whole.source_ids, round=1))
+    # Reviews follow all the units, in study order.
+    assignments += [StudyAssignment(whole_units[index].unit, "review", whole_units[index].source_ids, round=1)
+                    for index in weak_indices if index in reviews]
     return tuple(StudyDay(number, (task,)) for number, task in enumerate(assignments, start=1))
 
 

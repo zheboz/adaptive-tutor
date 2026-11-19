@@ -92,41 +92,56 @@ class FocusAndReplanTests(unittest.TestCase):
         self.state.flag("unknown")
         self.assertNotIn("unknown", self.state.flagged)
 
-    def test_daily_check_inserts_a_review_after_the_day(self):
+    def wrong_answers(self, unit_id, count, right=0):
+        asked = []
+        for correct in [False] * count + [True] * right:
+            question_id = f"q{len(self.state.answers()) + 1}"
+            self.state.record(question_id, unit_id, "multiple_choice", correct, "diagnosis")
+            asked.append(question_id)
+        return asked
+
+    def test_three_wrong_answers_add_a_review_at_the_end(self):
         days = schedule_units(UNITS, 3)
         same, change = after_daily_check(self.state, diagnosis(), days, 2)
         self.assertEqual((same, change), (days, None))
 
-        self.answer("unit-2", False, False)
+        asked = self.wrong_answers("unit-2", 3)
         updated, change = after_daily_check(
-            self.state, diagnosis("unit-2", "confirmed", "review_today", ["q1", "q2"]), days, 2)
-        self.assertEqual([d.assignments[0].kind for d in updated], ["study", "study", "review", "study"])
-        self.assertEqual([d.number for d in updated], [1, 2, 3, 4])
-        self.assertEqual((updated[2].assignments[0].unit.unit_id, updated[2].assignments[0].round), ("unit-2", 1))
-        self.assertIn("Added a review of Variable updates as day 3", change.message)
-        self.assertIn("needs another session", change.message)
+            self.state, diagnosis("unit-2", "confirmed", "review_today", asked), days, 2, asked)
+        self.assertEqual(updated[:3], days)
+        self.assertEqual(len(updated), 4)
+        review = updated[3].assignments[0]
+        self.assertEqual((review.unit.unit_id, review.kind, review.round), ("unit-2", "review", 1))
+        self.assertTrue(change.changed)
+        self.assertIn("Added a review of Variable updates as day 4, at the end of the plan", change.message)
         self.assertIn("unit-2", self.state.flagged)
         # A review already planned later is not added again.
-        again, note = after_daily_check(self.state, diagnosis("unit-2", "confirmed", "review_today"), updated, 2)
+        again, note = after_daily_check(self.state, diagnosis("unit-2", "confirmed", "review_today"), updated, 2,
+                                        asked)
         self.assertEqual(again, updated)
-        self.assertIn("already planned for day 3, so no day was added", note.message)
+        self.assertFalse(note.changed)
+        self.assertIn("already planned for day 4, so no day was added", note.message)
 
-    def test_a_review_comes_after_the_units_remaining_study_days(self):
-        days = schedule_units(UNITS, 5)
-        plan = [(d.assignments[0].unit.unit_id, d.assignments[0].kind) for d in days]
-        self.assertEqual(plan[2:4], [("unit-2", "read"), ("unit-2", "apply")])
-        updated, change = after_daily_check(self.state, diagnosis("unit-2", next_step="review_today"), days, 3)
-        plan = [(d.assignments[0].unit.unit_id, d.assignments[0].kind) for d in updated]
-        self.assertEqual(plan[2:6], [("unit-2", "read"), ("unit-2", "apply"), ("unit-2", "review"), ("unit-3", "study")])
-        self.assertIn("as day 5", change.message)
+    def test_one_or_two_wrong_answers_add_no_review(self):
+        days = schedule_units(UNITS, 3)
+        for wrong, right in ((1, 2), (2, 1), (2, 0)):
+            with self.subTest(wrong=wrong, right=right):
+                asked = self.wrong_answers("unit-2", wrong, right)
+                same, note = after_daily_check(
+                    self.state, diagnosis("unit-2", "confirmed", "review_today"), days, 2, asked)
+                self.assertEqual(same, days)
+                self.assertFalse(note.changed)
+                self.assertIn(f"{wrong} of {wrong + right} answers in this check were wrong", note.message)
+                self.assertIn("only after 3 wrong answers", note.message)
 
     def test_revisit_names_the_earlier_unit_and_no_gap_reviews_the_weakest_today(self):
         days = schedule_units(UNITS, 3)
-        updated, change = after_daily_check(self.state, diagnosis("unit-1", next_step="revisit_earlier"), days, 3)
+        asked = self.wrong_answers("unit-3", 3)
+        updated, change = after_daily_check(self.state, diagnosis("unit-1", next_step="revisit_earlier"), days, 3,
+                                            asked)
         self.assertEqual(updated[3].assignments[0].unit.unit_id, "unit-1")
         self.assertIn("comes from this earlier unit", change.message)
-        self.answer("unit-3", False)
-        updated, _ = after_daily_check(self.state, diagnosis(next_step="review_today"), days, 3)
+        updated, _ = after_daily_check(self.state, diagnosis(next_step="review_today"), days, 3, asked)
         self.assertEqual(updated[3].assignments[0].unit.unit_id, "unit-3")
 
     def test_each_review_round_is_numbered(self):

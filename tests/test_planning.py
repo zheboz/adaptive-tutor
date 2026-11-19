@@ -186,7 +186,8 @@ class WeakUnitSchedulingTests(unittest.TestCase):
                                 ("unit-4", "read"), ("unit-4", "read"), ("unit-4", "apply"), ("unit-5", "study")])
         long = [(a.unit.unit_id, a.kind) for day in schedule_units(self.units, 20, {"unit-4"}) for a in day.assignments]
         self.assertEqual(long.count(("unit-4", "review")), 1)
-        self.assertEqual(long.index(("unit-4", "review")), long.index(("unit-4", "apply")) + 1)
+        # Review days come after all the units.
+        self.assertEqual(long[-1], ("unit-4", "review"))
         self.assertEqual(sum(kind == "review" for _, kind in long), 1)
         self.assertEqual(len(long), 16)
 
