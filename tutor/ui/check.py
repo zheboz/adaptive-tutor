@@ -77,9 +77,12 @@ def _prepare(check: dict[str, Any], units: Sequence[StudyUnit], pages: Sequence[
         def reason(unit_id: str) -> str:
             if bank.remaining(unit_id, ()):
                 return "Every question from today's pages has been asked already."
+            if unit_id in bank.retryable:
+                return f"No question passed verification this time ({bank.problems[unit_id]})"
             return bank.problems.get(unit_id) or "The pages have no point the tutor could ask about."
 
         check["empty"] = [(titles[unit_id], reason(unit_id)) for unit_id in today]
+        check["retry"] = [unit_id for unit_id in today if unit_id in bank.retryable]
         return
     session = start_session(units, state, bank, daily_config(units, today, check["day"], askable))
     session.trace.spans.extend(trace.spans)
@@ -88,6 +91,20 @@ def _prepare(check: dict[str, Any], units: Sequence[StudyUnit], pages: Sequence[
 
 def end_check() -> None:
     st.session_state.pop("check", None)
+
+
+def _finish_without_questions(day: int) -> None:
+    """Nothing could be asked: the day still counts as checked."""
+    completed_days().add(day)
+    end_check()
+
+
+def _retry_preparing(units: Sequence[StudyUnit], pages: Sequence[PdfPage], unit_ids: list[str]) -> None:
+    check = st.session_state.check
+    days = st.session_state.study_plan
+    day_bank(units, pages, days[check["day"] - 1]).forget(unit_ids)
+    check["empty"] = None
+    check["retry"] = []
 
 
 def _advance(check: dict[str, Any], answer: int | None) -> None:
@@ -146,10 +163,21 @@ def render_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> bool:
     if check["session"] is None and check["empty"] is None and not check["error"]:
         _prepare(check, units, pages)
     if check["empty"] is not None:
-        st.info("There is nothing to check from today's material, so the plan is unchanged.")
+        retry = check.get("retry") or []
+        if retry:
+            st.warning("No question could be prepared from today's material this time. You can try again, "
+                       "or continue: the day is marked as checked and the plan is unchanged.")
+        else:
+            st.info("There is nothing to check from today's material. When you continue, the day is marked "
+                    "as checked and the plan is unchanged.")
         for title, reason in check["empty"]:
             st.caption(f"{title}: {reason}")
-        st.button("Continue", key="check_close", type="primary", on_click=end_check)
+        with st.container(horizontal=True):
+            st.button("Continue", key="check_close", type="primary", on_click=_finish_without_questions,
+                      args=(check["day"],))
+            if retry:
+                st.button("Try again", key="check_prepare_again", on_click=_retry_preparing,
+                          args=(units, pages, retry))
         return True
     if check["session"] is not None and check["step"] is None and not check["error"]:
         _advance(check, None)

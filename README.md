@@ -43,10 +43,12 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 
 ### Page layout
 
-A step bar at the top shows where you are (Upload › Outline › Mark & quiz › Plan › Study) and what to do next. The PDF stays on the left, with the text read from the current page in a collapsed **Extracted text** section below it. On the right, a row of views replaces the long scrolling page:
+A step bar at the top shows where you are (Upload › Outline › Mark & quiz › Plan › Study) and what to do next. The PDF stays on the left, with the text read from the current page in a collapsed **Extracted text** section below it. On the right, a row of views:
 
-- Before the plan: **Outline** (check the topics you don't understand), **Initial quiz**, **Ask the tutor** and **Progress**.
-- After the plan: **Today** (the open study day and its check), **Plan** (goal, length and checked days, every day in a table, plan changes and the outline), **Ask the tutor** and **Progress** (each unit's status and the initial quiz answers).
+- Before the plan: **Outline** (check the topics you don't understand), **Initial quiz** and **Progress**.
+- After the plan: **Today** (the open study day and its check), **Plan** (goal, length and checked days, every day in a table, plan changes and the outline) and **Progress** (each unit's status and the initial quiz answers).
+
+**Ask the tutor** is below the PDF and the views, across the full width.
 
 Days are picked from a row of buttons: ✓ marks a checked day and ↻ a review day. Page links in any view open the page in the PDF beside it. The app switches to the quiz when it starts and to Today when a plan is created.
 
@@ -84,7 +86,7 @@ Days are picked from a row of buttons: ✓ marks a checked day and ↻ a review 
 
 ### Checking your understanding each day
 
-Study a day's readings and task, then select **Check my understanding** at the bottom of the day. Only then are questions prepared, from that day's pages alone; a review day gets fresh questions. When the day's pages have nothing the tutor can ask about, it says so for each unit and leaves the plan unchanged.
+Study a day's readings and task, then select **Check my understanding** at the bottom of the day. Only then are questions prepared, from that day's pages alone; a review day gets fresh questions. When the day's pages have nothing the tutor can ask about, it says so for each unit; when you continue, the day is marked as checked and the plan is unchanged. When questions were made but none passed verification, **Try again** prepares them again.
 
 Otherwise the tutor asks up to three questions, choosing each from your earlier answers and showing why. After every answer you see whether it was right, the correct answer, an explanation, and the supporting passage with a link to its page; at the end every answer is listed again. It reports a confirmed gap only after at least two wrong answers on a unit that outnumber the correct ones. A review day is added only when at least two answers in the check are wrong and they outnumber the right ones (2 of 2, 2 of 3 or 3 of 3), the same standard as a likely gap; otherwise the check says so and the plan stays as it is. A review goes at the end of the plan, for today's unit or, when your earlier answers show the cause is an earlier unit, for that unit. A review already planned is not added twice.
 

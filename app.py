@@ -131,7 +131,8 @@ def current_step(result: outline.Outline | None, has_plan: bool) -> tuple[int, s
 
 
 def render_views(result: outline.Outline | None, pages: list[PdfPage], has_plan: bool) -> None:
-    """The view beside the PDF. Each view keeps the PDF in sight, so its page links can be followed."""
+    """The view beside the PDF. Each view keeps the PDF in sight, so its page links can be followed.
+    Ask the tutor is below both, across the full width."""
     units = st.session_state.get("study_units")
     if result is None:
         st.header("Study outline")
@@ -139,13 +140,12 @@ def render_views(result: outline.Outline | None, pages: list[PdfPage], has_plan:
             st.caption("Select Generate outline in the sidebar to see the topics and their source pages.")
         return
     if has_plan:
-        options = ["Today", "Plan", "Ask the tutor", "Progress"]
+        options = ["Today", "Plan", "Progress"]
     else:
-        options = ["Outline", *(["Initial quiz"] if quiz.started() else []), "Ask the tutor",
-                   *(["Progress"] if units else [])]
+        options = ["Outline", *(["Initial quiz"] if quiz.started() else []), *(["Progress"] if units else [])]
     view = navigation.render_view_bar(options)
     panels = {"Outline": "outline_panel", "Initial quiz": "quiz_panel", "Today": "plan_panel",
-              "Plan": "plan_overview_panel", "Ask the tutor": "tutor_panel", "Progress": "progress_panel"}
+              "Plan": "plan_overview_panel", "Progress": "progress_panel"}
     with st.container(height=READER_PANEL_HEIGHT, border=True, key=panels[view]):
         if view == "Outline":
             views.render_outline_topics(result)
@@ -155,8 +155,6 @@ def render_views(result: outline.Outline | None, pages: list[PdfPage], has_plan:
             views.render_today(units, pages)
         elif view == "Plan":
             views.render_plan_overview(units, result)
-        elif view == "Ask the tutor":
-            tutor_chat.render_tutor_chat(pages, tutor_context(result), READER_PANEL_HEIGHT - 140)
         else:
             views.render_progress(units)
 
@@ -215,6 +213,9 @@ def main() -> None:
         render_extracted_text(page)
     with learning_column:
         render_views(result, pages, has_plan)
+    if result is not None:
+        st.header("Ask the tutor")
+        tutor_chat.render_tutor_chat(pages, tutor_context(result), 360)
 
 
 if __name__ == "__main__":

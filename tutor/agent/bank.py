@@ -13,7 +13,7 @@ import threading
 import unicodedata
 
 from tutor.assessment import questions, retrieval
-from tutor.assessment.questions import PracticeError, Question
+from tutor.assessment.questions import InsufficientEvidence, PracticeError, Question
 from tutor.materials.ingest import PdfPage
 from tutor.planning import StudyAssignment, StudyUnit
 
@@ -55,6 +55,8 @@ class QuestionBank:
         self._executor: ThreadPoolExecutor | None = None
         self._lock = threading.Lock()
         self.problems: dict[str, str] = {}
+        # Units whose questions failed verification this time; asking again may succeed.
+        self.retryable: set[str] = set()
 
     @property
     def unit_ids(self) -> tuple[str, ...]:
@@ -77,8 +79,12 @@ class QuestionBank:
             built = questions.generate_questions(
                 assignment, passages, assigned_reading=reading, questions_wanted=QUESTIONS_PER_UNIT,
             )
+        except InsufficientEvidence as error:
+            self.problems[unit_id] = str(error)
+            return ()
         except PracticeError as error:
             self.problems[unit_id] = str(error)
+            self.retryable.add(unit_id)
             return ()
         # Multiple choice first: a true/false answer is right half the time by chance.
         ranked = sorted(built, key=lambda question: question.kind == "true_false")
@@ -112,6 +118,13 @@ class QuestionBank:
         future = self._pending.pop(unit_id, None)
         # A failed request is not cached, so the next pick retries it.
         self._questions[unit_id] = future.result() if future is not None else self._build(unit_id)
+
+    def forget(self, unit_ids: Iterable[str]) -> None:
+        """Drop the cached result for these units, so the next use builds their questions again."""
+        for unit_id in unit_ids:
+            self._questions.pop(unit_id, None)
+            self.problems.pop(unit_id, None)
+            self.retryable.discard(unit_id)
 
     def prepare(self, unit_ids: Iterable[str]) -> dict[str, int]:
         """Build questions for these units now, in parallel; return how many each has."""

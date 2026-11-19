@@ -7,7 +7,7 @@ from streamlit.testing.v1 import AppTest
 from tests.test_agent_loop import ScriptedModel, turn
 from tests.test_outline_ui import upload
 from tests.test_pdf_preview import APP, button, previewed_pdf
-from tests.test_planning_ui import create_plan, show_view
+from tests.test_planning_ui import create_plan
 from tutor.agent.qa import MAX_MODEL_CALLS, Citation, ask, start_qa
 from tutor.assessment.retrieval import build_index, search
 from tutor.llm import LLMError
@@ -164,7 +164,6 @@ class TutorChatUITests(unittest.TestCase):
         button(self.app.sidebar, "Generate outline").click().run()
         self.app.checkbox(key="weak_topic_0").check()
         create_plan(self.app, 2)
-        show_view(self.app, "Ask the tutor")
         model = ScriptedModel(
             turn("search_material", 1, query="x = x + 1"),
             turn("answer", 2, text="It **adds one** to x.", citations=[{"page": "p2", "quote": QUOTE}]),
@@ -181,9 +180,9 @@ class TutorChatUITests(unittest.TestCase):
             panel = self.app.main.container("tutor_chat_panel")
             self.assertIn("It **adds one** to x.", [m.value for m in panel.markdown])
             panel.button(key="qa_0_p2").click().run()
-            # The PDF beside the chat opens the cited page, and the chat stays open.
+            # The cited page opens in the PDF; the chat below and the view beside the PDF stay as they were.
             self.assertEqual(previewed_pdf(self.app), (self.document, [2]))
-            self.assertEqual(self.app.segmented_control(key="right_view").value, "Ask the tutor")
+            self.assertEqual(self.app.segmented_control(key="right_view").value, "Today")
 
             self.app.chat_input(key="tutor_question").set_value("What is recursion?").run()
             panel = self.app.main.container("tutor_chat_panel")
@@ -193,7 +192,6 @@ class TutorChatUITests(unittest.TestCase):
 
     def test_an_outage_is_shown_and_the_question_can_be_asked_again(self):
         button(self.app.sidebar, "Generate outline").click().run()
-        show_view(self.app, "Ask the tutor")
         with patch("tutor.agent.qa.call_with_tools", side_effect=LLMError("Could not reach OpenAI.")):
             self.app.chat_input(key="tutor_question").set_value("Explain loops").run()
         self.assertIn("Could not reach OpenAI.", self.app.main.container("tutor_chat_panel").error[0].value)

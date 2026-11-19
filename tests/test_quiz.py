@@ -137,7 +137,7 @@ class QuizUITests(unittest.TestCase):
         self.assertTrue(self.plan_controls())
         self.assertIn("Done: 1 of 2 correct. More time for: Loops.", visible_text(self.app.sidebar))
         self.assertEqual(self.app.segmented_control(key="right_view").options,
-                         ["Outline", "Initial quiz", "Ask the tutor", "Progress"])
+                         ["Outline", "Initial quiz", "Progress"])
 
         create_plan(self.app, 4)
         self.assertEqual(self.app.session_state["planned_weak"], ("unit-1", "unit-2"))

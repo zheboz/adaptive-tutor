@@ -79,7 +79,8 @@ class PlanningUITests(unittest.TestCase):
         button(app.sidebar, "Generate outline").click().run()
         left, right = document_row(app).children.values()
         self.assertEqual(previewed_pdf(left), (document, [1]))
-        self.assertEqual(app.segmented_control(key="right_view").options, ["Outline", "Ask the tutor"])
+        self.assertEqual(app.segmented_control(key="right_view").options, ["Outline"])
+        self.assertIn("Ask the tutor", [h.value for h in app.main.header])
         self.assertIn("Update a variable", visible_text(right.container("outline_panel")))
         self.assertIn("**3 · Mark & quiz**", app.main.container("steps").markdown[0].value)
         # The extracted text sits in a collapsed section under the PDF.
@@ -91,7 +92,7 @@ class PlanningUITests(unittest.TestCase):
         left, right = document_row(app).children.values()
         self.assertEqual(previewed_pdf(left), (document, [1]))
         self.assertEqual(app.segmented_control(key="right_view").value, "Today")
-        self.assertEqual(app.segmented_control(key="right_view").options, ["Today", "Plan", "Ask the tutor", "Progress"])
+        self.assertEqual(app.segmented_control(key="right_view").options, ["Today", "Plan", "Progress"])
         self.assertIn("Read an assignment", visible_text(right.container("plan_panel")))
         self.assertIn("**5 · Study**", app.main.container("steps").markdown[0].value)
         self.assertTrue(app.main.container("plan_panel").proto.height_config.pixel_height > 0)

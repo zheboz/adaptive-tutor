@@ -112,7 +112,9 @@ class PracticeQuestionTests(unittest.TestCase):
             [self.generated.model_copy(update={"correct_index":2})],
             [self.original.model_copy(update={"options":["x", "X"]})],
             [self.generated.model_copy(update={"explanation":" "})],
-            [self.generated.model_copy(update={"concept_id":"p1-invented"})],
+            # An invalid learning point ID with nothing in common with any learning point.
+            [self.generated.model_copy(update={"concept_id": "p1-c1", "prompt": "Mars is a red planet.",
+                                               "explanation": "Astronomy says so."})],
             [self.generated.model_copy(update={"concept_id":None})],
             [self.original.model_copy(update={"concept_id":None})],
         )
@@ -218,3 +220,12 @@ class PracticeQuestionTests(unittest.TestCase):
         self.assertEqual(json.loads(self.generate.call_args.kwargs["content"])["questions_wanted"], 3)
         generate_questions(self.assignment, self.passages)
         self.assertNotIn("questions_wanted", json.loads(self.generate.call_args.kwargs["content"]))
+
+    def test_an_invalid_learning_point_id_is_matched_to_the_closest_point(self):
+        # Models sometimes copy a passage ID into concept_id; the question is still about a learning point.
+        draft = self.generated.model_copy(update={"concept_id": "p1-c1"})
+        result, = self.batch(draft, generate=_model_questions)
+        self.assertEqual(result.concept_id, self.concept_id)
+        self.assertEqual((result.evidence, result.evidence_source_id), (self.fact, "p1"))
+        prompt = self.generate.call_args.kwargs["instructions"]
+        self.assertIn("passage IDs such as p5-c1 are not learning points", prompt)

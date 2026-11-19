@@ -7,7 +7,7 @@ from tests.test_agent_loop import ScriptedModel, turn
 from tests.test_outline_ui import upload
 from tests.test_pdf_preview import APP, button
 from tests.test_planning_ui import create_plan, metrics, open_day, show_view, visible_text
-from tutor.assessment.questions import InsufficientEvidence, Question
+from tutor.assessment.questions import InsufficientEvidence, PracticeError, Question
 from tutor.llm import LLMError
 from tutor.materials.outline import Outline, Topic
 from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
@@ -155,11 +155,26 @@ class CheckUITests(unittest.TestCase):
         self.generate.side_effect = InsufficientEvidence("The assigned pages have no teaching point to assess.")
         button(self.panel(), "Check my understanding").click().run()
         text = self.text()
-        self.assertIn("There is nothing to check from today's material, so the plan is unchanged.", text)
+        self.assertIn("There is nothing to check from today's material. When you continue, the day is "
+                      "marked as checked", text)
         self.assertIn("Assignment: The assigned pages have no teaching point to assess.", text)
+        self.assertNotIn("Try again", [b.label for b in self.panel().button])
         self.assertEqual(self.model.seen, [])
         button(self.panel(), "Continue").click().run()
-        self.assertNotIn("Day 1 · checked", [s.value for s in self.panel().subheader])
+        self.assertIn("Day 1 · checked", [s.value for s in self.panel().subheader])
+        self.assertIn("1 of 3 days checked", self.text())
+
+    def test_questions_that_fail_verification_can_be_prepared_again(self):
+        self.generate.side_effect = PracticeError("A question referenced a learning point that is not in the "
+                                                  "assigned reading.")
+        button(self.panel(), "Check my understanding").click().run()
+        text = self.text()
+        self.assertIn("No question could be prepared from today's material this time.", text)
+        self.assertIn("No question passed verification this time", text)
+        self.generate.side_effect = three_questions
+        self.model.turns += [turn("ask_question", 1, unit_id="unit-1", reason="Now there are questions.")]
+        button(self.panel(), "Try again").click().run()
+        self.assertIn("Why this question: Now there are questions.", self.text())
 
     def test_an_outage_can_be_retried_or_the_check_stopped(self):
         self.generate.side_effect = LLMError("Could not reach OpenAI.")
