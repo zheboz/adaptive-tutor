@@ -1,4 +1,4 @@
-"""Render the original PDF page and its extracted text in separate reading panels."""
+"""Render the original PDF page, with the text read from it in a collapsed section below."""
 
 import streamlit as st
 from streamlit.runtime.uploaded_file_manager import UploadedFile
@@ -41,12 +41,12 @@ def render_pdf_preview(upload: UploadedFile, pages: list[PdfPage]) -> PdfPage:
 
 
 def render_extracted_text(page: PdfPage) -> None:
-    st.header("Extracted text")
-    with st.container(key="extracted_text_panel", height=240, border=True):
-        st.caption(f"Page {page.number}")
-        if page.error:
-            st.warning(page.error)
-        elif page.text.strip():
-            st.code(page.text, language=None)
-        else:
-            st.info("No selectable text on this page. It may be blank or scanned. Scanned pages need OCR.")
+    """The text read from the page, for checking what the tutor works from; collapsed by default."""
+    with st.expander(f"Extracted text · page {page.number}"):
+        with st.container(key="extracted_text_panel", height=240, border=False):
+            if page.error:
+                st.warning(page.error)
+            elif page.text.strip():
+                st.code(page.text, language=None)
+            else:
+                st.info("No selectable text on this page. It may be blank or scanned. Scanned pages need OCR.")

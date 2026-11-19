@@ -78,7 +78,9 @@ class PdfPreviewTests(unittest.TestCase):
         self.assertEqual(previewed_pdf(app), (first, [1]))
         text_panel = app.main.container("extracted_text_panel")
         self.assertGreater(text_panel.proto.height_config.pixel_height, 0)
-        self.assertFalse(any(expander.code for expander in app.main.expander))
+        (extracted,) = app.main.expander
+        self.assertEqual(extracted.label, "Extracted text · page 1")
+        self.assertFalse(extracted.proto.expanded)
         self.assertEqual(text_panel.code[0].value.strip(), "First page")
         self.assertTrue(button(app.main, "Previous page").disabled)
         button(app.main, "Next page").click().run()

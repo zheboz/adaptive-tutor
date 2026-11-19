@@ -41,6 +41,15 @@ uv run --no-project --env-file .env -- .venv/bin/python -m streamlit run app.py
 
 The default model is `gpt-4.1-mini`. To choose another model that supports structured outputs, set `OPENAI_MODEL` in the server environment.
 
+### Page layout
+
+A step bar at the top shows where you are (Upload › Outline › Mark & quiz › Plan › Study) and what to do next. The PDF stays on the left, with the text read from the current page in a collapsed **Extracted text** section below it. On the right, a row of views replaces the long scrolling page:
+
+- Before the plan: **Outline** (check the topics you don't understand), **Initial quiz**, **Ask the tutor** and **Progress**.
+- After the plan: **Today** (the open study day and its check), **Plan** (goal, length and checked days, every day in a table, plan changes and the outline), **Ask the tutor** and **Progress** (each unit's status and the initial quiz answers).
+
+Days are picked from a row of buttons: ✓ marks a checked day and ↻ a review day. Page links in any view open the page in the PDF beside it. The app switches to the quiz when it starts and to Today when a plan is created.
+
 ### Generating an outline
 
 1. Upload a PDF in the sidebar. Use the up/down arrows or the page selector beneath the PDF to navigate the original document. **Extracted text** below the reading area follows the selected page. The preview works offline.
@@ -55,7 +64,7 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 
 ### Initial quiz, then the plan
 
-1. After the outline appears, check **I don't understand this** under the topics you find unclear.
+1. After the outline appears, check **I don't understand this** under the topics you find unclear in the **Outline** view.
 2. Select **Start initial quiz** in the sidebar. The study units are prepared, and the quiz takes the outline's place beside the PDF:
    - With topics checked, there is one question for each checked topic, in the order you checked them. Each question is built from that topic's own pages.
    - With nothing checked, up to three questions come from topics spread across the whole material.

@@ -5,7 +5,7 @@ from streamlit.testing.v1 import AppTest
 
 from tests.test_outline_ui import upload
 from tests.test_pdf_preview import APP, button, previewed_pdf
-from tests.test_planning_ui import create_plan, visible_text
+from tests.test_planning_ui import create_plan, show_view, visible_text
 from tutor.agent.quiz import Quiz, QuizItem, build_quiz, choose_topics, grade_quiz
 from tutor.agent.state import LearnerState
 from tutor.assessment.questions import InsufficientEvidence, Question
@@ -136,12 +136,19 @@ class QuizUITests(unittest.TestCase):
         self.assertEqual(previewed_pdf(self.app), (self.document, [3]))
         self.assertTrue(self.plan_controls())
         self.assertIn("Done: 1 of 2 correct. More time for: Loops.", visible_text(self.app.sidebar))
+        self.assertEqual(self.app.segmented_control(key="right_view").options,
+                         ["Outline", "Initial quiz", "Ask the tutor", "Progress"])
 
         create_plan(self.app, 4)
         self.assertEqual(self.app.session_state["planned_weak"], ("unit-1", "unit-2"))
-        plan = visible_text(self.app.main.container("plan_panel"))
+        show_view(self.app, "Plan")
+        plan = visible_text(self.app.main.container("plan_overview_panel"))
         self.assertIn("Initial quiz: 1 of 2 correct. More time for: Loops.", plan)
+        # Unit names show the outline topics they cover.
+        self.assertIn("More time for: Variables (topics: Assignment; Updates); Loops", plan)
         self.assertNotIn("Start initial quiz", [b.label for b in self.app.sidebar.button])
+        show_view(self.app, "Progress")
+        self.assertIn("Initial quiz: 1 of 2 correct", [e.label for e in self.app.main.expander])
 
     def test_with_nothing_checked_up_to_three_topics_are_quizzed(self):
         self.assertIn("up to 3 questions", visible_text(self.app.sidebar))

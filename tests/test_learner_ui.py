@@ -6,7 +6,7 @@ from streamlit.testing.v1 import AppTest
 
 from tests.test_outline_ui import upload
 from tests.test_pdf_preview import APP, button
-from tests.test_planning_ui import create_plan, visible_text
+from tests.test_planning_ui import create_plan, show_view, visible_text
 from tutor.materials.outline import Outline, Topic
 from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
 
@@ -32,6 +32,7 @@ class LearnerUITests(unittest.TestCase):
         button(self.app.sidebar, "Generate outline").click().run()
 
     def status_text(self):
+        show_view(self.app, "Progress")
         html = visible_text(self.app.main.container("learning_status_panel"))
         return re.sub(r"\s*<br>\s*", "\n", re.sub(r"</?(?:p|strong|small)>", "", html))
 
@@ -42,7 +43,8 @@ class LearnerUITests(unittest.TestCase):
         self.assertFalse(self.app.exception)
 
     def plan_text(self):
-        return visible_text(self.app.main.container("plan_panel"))
+        show_view(self.app, "Plan")
+        return visible_text(self.app.main.container("plan_overview_panel"))
 
     def test_weak_topics_on_the_outline_get_more_time(self):
         self.assertEqual(len(self.app.main.container("outline_panel").checkbox), 3)
@@ -61,6 +63,9 @@ class LearnerUITests(unittest.TestCase):
         self.plan(3, 0, 2)
         self.assertEqual(self.app.session_state["planned_weak"], ("unit-1", "unit-3"))
         self.assertIn("Loop counts · Marked weak · not checked yet", self.status_text())
+        # The outline is in the Plan view now; its checks keep what was checked before.
+        show_view(self.app, "Plan")
+        self.assertTrue(self.app.checkbox(key="weak_topic_0").value)
         # Unchecking alone changes nothing until the plan is created again.
         self.app.checkbox(key="weak_topic_0").uncheck().run()
         self.assertEqual(self.app.session_state["planned_weak"], ("unit-1", "unit-3"))

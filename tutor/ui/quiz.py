@@ -15,6 +15,7 @@ from tutor.llm import LLMError
 from tutor.materials.ingest import PdfPage
 from tutor.materials.outline import Outline
 from tutor.planning import StudyUnit
+from tutor.ui import navigation
 from tutor.ui.feedback import render_feedback
 from tutor.ui.learner import learner_state, weak_topics_in_order, weak_unit_ids
 
@@ -65,13 +66,14 @@ def render_start(result: Outline, pages: Sequence[PdfPage],
     if checked:
         st.caption(f"One question for each topic you checked ({len(checked)}), in the order you checked them.")
     else:
-        st.caption("Check the topics you don't understand in the outline first. With none checked, the "
-                   "quiz asks up to 3 questions from across the material.")
+        st.caption("Check the topics you don't understand in the Outline view first. With none checked, "
+                   "the quiz asks up to 3 questions from across the material.")
     if st.button("Start initial quiz", key="start_initial_quiz", type="primary", disabled=started()):
         units = ensure_units(result)
         if units is not None:
             learner_state(units).apply_report(weak_unit_ids(units))
             _build(result, units, pages, choose_topics(len(result.topics), checked))
+            navigation.show_view("Initial quiz")
             st.rerun()
 
 
@@ -140,3 +142,15 @@ def render_quiz(result: Outline, units: Sequence[StudyUnit], pages: Sequence[Pdf
     _render_skipped(quiz)
     st.info("Next: set the number of days in the sidebar and select Create study plan. Topics you "
             "checked, and topics you answered wrong, get more of the time.")
+
+
+def render_quiz_review() -> None:
+    """The quiz answers again, for the Progress view."""
+    data = _data()
+    if not done() or not data["results"]:
+        return
+    results = data["results"]
+    with st.expander(f"Initial quiz: {sum(r.correct for r in results)} of {len(results)} correct"):
+        for number, item_result in enumerate(results, start=1):
+            item = item_result.item
+            render_feedback(number, item.topic_title, item.question, item_result.choice, f"quiz_review_{item.id}")

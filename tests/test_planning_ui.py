@@ -24,6 +24,19 @@ def create_plan(app, days):
     button(app.sidebar, "Create study plan").click().run()
 
 
+def show_view(app, name):
+    app.segmented_control(key="right_view").set_value(name).run()
+
+
+def open_day(app, day):
+    show_view(app, "Today")
+    app.segmented_control(key="day_picker").set_value(day).run()
+
+
+def metrics(app):
+    return {metric.label: metric.value for metric in app.main.metric}
+
+
 def visible_text(app):
     return "\n".join(
         item.value
@@ -58,34 +71,36 @@ class PlanningUITests(unittest.TestCase):
         self.app = AppTest.from_file(APP).run()
 
     @patch("tutor.materials.outline.generate_outline")
-    def test_outline_moves_below_the_reading_row_when_plan_is_created(self, generate):
+    def test_views_beside_the_pdf_follow_the_steps(self, generate):
         app = self.app
         generate.return_value = self.outline
         document = upload(app, "Variable updates", "Loop tracing")
+        self.assertIn("**2 · Outline**", app.main.container("steps").markdown[0].value)
         button(app.sidebar, "Generate outline").click().run()
         left, right = document_row(app).children.values()
         self.assertEqual(previewed_pdf(left), (document, [1]))
+        self.assertEqual(app.segmented_control(key="right_view").options, ["Outline", "Ask the tutor"])
         self.assertIn("Update a variable", visible_text(right.container("outline_panel")))
-        self.assertFalse(document_row(app).code)
+        self.assertIn("**3 · Mark & quiz**", app.main.container("steps").markdown[0].value)
+        # The extracted text sits in a collapsed section under the PDF.
+        (extracted,) = [e for e in app.main.expander if e.label.startswith("Extracted text")]
+        self.assertEqual(extracted.label, "Extracted text · page 1")
         self.assertEqual(app.main.container("extracted_text_panel").code[0].value.strip(), "Variable updates")
 
         create_plan(app, 2)
         left, right = document_row(app).children.values()
         self.assertEqual(previewed_pdf(left), (document, [1]))
+        self.assertEqual(app.segmented_control(key="right_view").value, "Today")
+        self.assertEqual(app.segmented_control(key="right_view").options, ["Today", "Plan", "Ask the tutor", "Progress"])
         self.assertIn("Read an assignment", visible_text(right.container("plan_panel")))
-        self.assertNotIn("outline_panel", [block.key for block in document_row(app).container])
-        self.assertFalse(document_row(app).code)
-        panels = [
-            block for block in app.main.container
-            if block.key in {"plan_panel", "outline_panel", "extracted_text_panel"}
-        ]
-        self.assertEqual([p.key for p in panels], ["plan_panel", "outline_panel", "extracted_text_panel"])
-        self.assertTrue(all(p.proto.height_config.pixel_height > 0 for p in panels))
+        self.assertIn("**5 · Study**", app.main.container("steps").markdown[0].value)
+        self.assertTrue(app.main.container("plan_panel").proto.height_config.pixel_height > 0)
 
-        button(app.main.container("outline_panel"), "Page 2").click().run()
+        show_view(app, "Plan")
+        button(app.main.container("plan_overview_panel"), "Page 2").click().run()
         self.assertEqual(previewed_pdf(app), (document, [2]))
         self.assertEqual(app.main.container("extracted_text_panel").code[0].value.strip(), "Loop tracing")
-        self.assertEqual(app.number_input(key="study_day").value, 1)
+        self.assertEqual(app.session_state["current_day"], 1)
         generate.assert_called_once()
         self.assertEqual(self.model.call_count, 2)
         self.assertFalse(app.exception)
@@ -109,39 +124,42 @@ class PlanningUITests(unittest.TestCase):
         units = app.session_state["study_units"]
         five_days = app.session_state["study_plan"]
         self.assertEqual(len(five_days), 4)
-        self.assertEqual(app.number_input(key="study_day").value, 1)
+        self.assertEqual(app.segmented_control(key="day_picker").value, 1)
         self.assertIn("Day 1", [item.value for item in app.subheader])
         reading = visible_text(app)
-        self.assertIn("5-day plan", reading)
         self.assertIn("Read an assignment", reading)
         self.assertIn("Describe an update.", reading)
         self.assertNotIn("Find the assigned value.", reading)
         self.assertNotRegex(reading, r"(?i)\b(?:mins?|minutes?)\b")
         self.assertEqual(app.button(key=f"plan_citation_1_{units[0].unit_id}_p1").label, "Page 1")
 
-        app.number_input(key="study_day").set_value(2).run()
+        open_day(app, 2)
         self.assertIn("Find the assigned value.", visible_text(app))
-        app.number_input(key="study_day").set_value(4).run()
+        open_day(app, 4)
         practice = visible_text(app)
         self.assertIn("Follow the loop", practice)
         self.assertIn("Trace the loop in the notes.", practice)
         self.assertNotRegex(practice, r"(?i)\b(?:mins?|minutes?)\b")
         app.button(key=f"plan_citation_4_{units[1].unit_id}_p2").click().run()
         self.assertEqual(previewed_pdf(app), (document, [2]))
-        self.assertEqual(app.number_input(key="study_day").value, 4)
+        self.assertEqual(app.segmented_control(key="day_picker").value, 4)
         self.assertEqual(app.session_state["study_plan"], five_days)
+        show_view(app, "Plan")
+        self.assertEqual(metrics(app)["Goal"], "5 days")
+        self.assertEqual(metrics(app)["Plan"], "4 days")
+        self.assertEqual([row["Day"] for row in app.dataframe[0].value.to_dict("records")], [1, 2, 3, 4, 5])
 
         create_plan(app, 10)
         ten_days = app.session_state["study_plan"]
         self.assertEqual(app.session_state["planned_days"], 10)
         self.assertEqual(app.session_state["study_units"], units)
         self.assertEqual(ten_days, five_days)
-        app.number_input(key="study_day").set_value(10).run()
+        open_day(app, 10)
         self.assertIn("Day 10", [item.value for item in app.subheader])
         self.assertRegex(visible_text(app), r"(?i)\breview\b")
         self.assertFalse(any((item.key or "").startswith("plan_citation_") for item in app.button))
         create_plan(app, 2)
-        self.assertEqual(app.number_input(key="study_day").value, 1)
+        self.assertEqual(app.segmented_control(key="day_picker").value, 1)
         self.assertIn("Find the assigned value.", visible_text(app))
         generate.assert_called_once()
         self.assertEqual([call.kwargs["schema"] for call in self.model.call_args_list], [UnitPlan, Solution])
@@ -172,7 +190,7 @@ class PlanningUITests(unittest.TestCase):
         self.assertEqual(app.session_state["unit_plan"], sort_plan)
         self.assertEqual([unit.title for unit in app.session_state["study_units"]], ["Order a list"])
         self.assertEqual(len(app.session_state["study_plan"]), 2)
-        app.number_input(key="study_day").set_value(20).run()
+        open_day(app, 20)
         self.assertRegex(visible_text(app), r"(?i)\breview\b")
         app.file_uploader[0].clear().run()
         self.assert_plan_cleared()

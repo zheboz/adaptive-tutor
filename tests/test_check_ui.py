@@ -6,7 +6,7 @@ from streamlit.testing.v1 import AppTest
 from tests.test_agent_loop import ScriptedModel, turn
 from tests.test_outline_ui import upload
 from tests.test_pdf_preview import APP, button
-from tests.test_planning_ui import create_plan, visible_text
+from tests.test_planning_ui import create_plan, metrics, open_day, show_view, visible_text
 from tutor.assessment.questions import InsufficientEvidence, Question
 from tutor.llm import LLMError
 from tutor.materials.outline import Outline, Topic
@@ -74,7 +74,9 @@ class CheckUITests(unittest.TestCase):
         self.generate.assert_not_called()
 
     def test_daily_checks_ask_from_the_days_pages_and_adjust_the_plan(self):
-        self.assertIn("Goal: 3 days · plan: 3 study days · 0 checked · 3 to go", self.text())
+        show_view(self.app, "Plan")
+        self.assertEqual(metrics(self.app), {"Goal": "3 days", "Plan": "3 days", "Checked": "0", "To go": "3"})
+        show_view(self.app, "Today")
 
         # Day 1: one right answer; the check continues without a change.
         self.model.turns += [
@@ -93,10 +95,11 @@ class CheckUITests(unittest.TestCase):
         self.assertIn("The plan is unchanged.", text)
         button(self.panel(), "Continue").click().run()
         self.assertIn("Day 1 · checked", [s.value for s in self.panel().subheader])
-        self.assertIn("1 checked · 2 to go", self.text())
+        self.assertIn("1 of 3 days checked", self.text())
+        self.assertEqual(self.app.segmented_control(key="day_picker").options, ["1 ✓", "2", "3"])
 
         # Day 2: one wrong answer and two right ones add no review.
-        self.app.number_input(key="study_day").set_value(2).run()
+        open_day(self.app, 2)
         self.model.turns += [
             turn("ask_question", 3, unit_id="unit-2", reason="Check updates."),
             turn("ask_question", 4, unit_id="unit-2", reason="Once more."),
@@ -116,10 +119,10 @@ class CheckUITests(unittest.TestCase):
         self.assertIn("No review was added: 1 of 3 answers in this check were wrong", text)
         self.assertNotIn("Plan change", text)
         button(self.panel(), "Continue").click().run()
-        self.assertIn("plan: 3 study days · 2 checked · 1 to go", self.text())
+        self.assertIn("2 of 3 days checked", self.text())
 
         # Day 3: two wrong answers out of three add a review at the end of the plan.
-        self.app.number_input(key="study_day").set_value(3).run()
+        open_day(self.app, 3)
         self.model.turns += [
             turn("ask_question", 7, unit_id="unit-3", reason="Check loops."),
             turn("ask_question", 8, unit_id="unit-3", reason="Again."),
@@ -135,12 +138,18 @@ class CheckUITests(unittest.TestCase):
         self.assertIn("Added a review of Loops as day 4, at the end of the plan", text)
         self.assertIn("Your answers in this check (3)", [e.label for e in self.panel().expander])
         button(self.panel(), "Continue").click().run()
-        text = self.text()
-        self.assertIn("plan: 4 study days · 3 checked · 1 to go", text)
-        self.assertIn("The plan now needs 4 days, 1 more than your goal", text)
-        self.assertIn("Plan changes (1)", [e.label for e in self.panel().expander])
-        self.app.number_input(key="study_day").set_value(4).run()
+        self.assertIn("3 of 4 days checked", self.text())
+        show_view(self.app, "Plan")
+        overview = self.app.main.container("plan_overview_panel")
+        self.assertEqual(metrics(self.app)["Plan"], "4 days")
+        self.assertIn("The plan now needs 4 days, 1 more than your goal", overview.warning[0].value)
+        self.assertIn("Plan changes (1)", [e.label for e in overview.expander])
+        rows = self.app.dataframe[0].value.to_dict("records")
+        self.assertEqual(rows[3]["Study"], "Review: Loops")
+        self.assertEqual([r["Status"] for r in rows], ["✓ checked"] * 3 + [""])
+        open_day(self.app, 4)
         self.assertIn("Review · Loops", visible_text(self.panel()))
+        self.assertEqual(self.app.segmented_control(key="day_picker").options, ["1 ✓", "2 ✓", "3 ✓", "4 ↻"])
 
     def test_a_day_with_nothing_to_ask_says_why(self):
         self.generate.side_effect = InsufficientEvidence("The assigned pages have no teaching point to assess.")
@@ -162,4 +171,4 @@ class CheckUITests(unittest.TestCase):
         self.assertIn("Why this question: Start.", self.text())
         button(self.panel(), "Stop check").click().run()
         self.assertNotIn("check", self.app.session_state)
-        self.assertIn("Goal: 3 days", self.text())
+        self.assertIn("Day 1", [s.value for s in self.panel().subheader])

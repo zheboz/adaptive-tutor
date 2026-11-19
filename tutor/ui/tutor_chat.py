@@ -24,7 +24,6 @@ def qa_session(pages: Sequence[PdfPage]) -> QASession:
 
 
 def render_tutor_chat(pages: Sequence[PdfPage], context: dict[str, Any], height: int) -> None:
-    st.header("Ask the tutor")
     session = qa_session(pages)
     chat = st.container(key="tutor_chat")
     messages = chat.container(height=height, border=True, key="tutor_chat_panel")

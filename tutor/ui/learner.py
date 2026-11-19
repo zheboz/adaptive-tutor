@@ -17,7 +17,8 @@ STATUS_LABELS = {
     "gap": "Likely gap",
 }
 WEAK_TOPIC_PREFIX = "weak_topic_"
-# Topic numbers in the order the learner checked them; the initial quiz follows this order.
+# Topic numbers in the order the learner checked them. This list, not the checkboxes, is the record:
+# a checkbox's own state is dropped while the outline is hidden behind another view.
 WEAK_TOPIC_ORDER = "checked_topic_order"
 
 
@@ -36,7 +37,8 @@ def _track_order(index: int) -> None:
 
 
 def render_weak_topic_checkbox(index: int) -> None:
-    st.checkbox("I don't understand this", key=weak_topic_key(index), on_change=_track_order, args=(index,))
+    st.checkbox("I don't understand this", key=weak_topic_key(index), value=index + 1 in weak_topics_in_order(),
+                on_change=_track_order, args=(index,))
 
 
 def clear_weak_topics() -> None:
@@ -46,19 +48,13 @@ def clear_weak_topics() -> None:
 
 
 def weak_topics_in_order() -> list[int]:
-    """1-based topic numbers in the order they were checked; any others follow in outline order."""
-    checked = weak_topic_numbers()
-    order = [number for number in st.session_state.get(WEAK_TOPIC_ORDER, []) if number in checked]
-    return order + sorted(checked - set(order))
+    """1-based topic numbers in the order they were checked."""
+    return list(st.session_state.get(WEAK_TOPIC_ORDER, []))
 
 
 def weak_topic_numbers() -> set[int]:
     """1-based outline topic numbers the learner has checked."""
-    return {
-        int(str(key)[len(WEAK_TOPIC_PREFIX):]) + 1
-        for key, checked in st.session_state.items()
-        if str(key).startswith(WEAK_TOPIC_PREFIX) and checked
-    }
+    return set(weak_topics_in_order())
 
 
 def weak_unit_ids(units: Sequence[StudyUnit]) -> tuple[str, ...]:
@@ -96,11 +92,10 @@ def _evidence_text(evidence) -> str:
     return " · ".join(parts) or "No answers yet"
 
 
-def render_learning_status(units: Sequence[StudyUnit], height: int) -> None:
+def render_learning_status(units: Sequence[StudyUnit]) -> None:
     state = learner_state(units)
-    st.header("Learning status")
-    with st.container(height=height, border=True, key="learning_status_panel"):
-        st.caption("Each status comes from your answers and the topics you marked weak, not from the reading alone.")
+    with st.container(key="learning_status_panel"):
+        st.caption("Each status comes from your answers and the topics you marked, not from the reading alone.")
         for evidence in state.units.values():
             st.html(
                 f"<p><strong>{escape(evidence.unit.title)}</strong> · {STATUS_LABELS[evidence.status]}"
