@@ -51,9 +51,10 @@ weak really are, and whether an earlier unit is the real cause, so the plan give
 time. next_step: review_gap when a unit needs extra time; continue when no gap was found."""
 
 _DAILY = """
-This is the check after study day {day}. The units studied today are listed in the task, and the
-learner's practice answers from today are already in the state. Ask follow-up questions only where that
-evidence is unclear; you may also check earlier units. next_step: continue when today's material is
+This is the check after study day {day}. The learner has just studied the units listed in studied_today.
+Ask questions only about those units; each question comes from the pages studied that day. Earlier
+units cannot be asked about, but their earlier answers are in the state: when they show that today's
+difficulty comes from an earlier unit, name it. next_step: continue when today's material is
 understood; review_today when a unit studied today needs another session; revisit_earlier when the
 difficulty comes from an earlier unit, named in primary_gap."""
 
@@ -131,6 +132,8 @@ def start_session(units: Sequence[StudyUnit], state: LearnerState, bank: Bank,
     }
     if config.today:
         opening["studied_today"] = list(config.today)
+    if config.ask_scope:
+        opening["units_you_can_ask_about"] = list(config.askable)
     opening["summary_language"] = summary_language(units)
     return Session(units, state, bank, tool_schemas(units, config),
                    [{"role": "user", "content": json.dumps(opening, ensure_ascii=False)}], config)
@@ -168,7 +171,7 @@ def _run_tool(session: Session, call: ToolCall) -> dict[str, Any] | Ask | Done:
         if len(session.asked) >= session.config.max_questions:
             _span("tool:ask_question", start, unit_id or "", "budget used")
             return {"error": f"All {session.config.max_questions} questions are used. Call finish."}
-        if unit_id not in session.config.scope:
+        if unit_id not in session.config.askable:
             _span("tool:ask_question", start, str(unit_id), "unknown unit")
             return {"error": f"Unknown unit {unit_id!r}."}
         try:

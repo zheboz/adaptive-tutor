@@ -7,7 +7,6 @@ from streamlit.testing.v1 import AppTest
 from tests.test_outline_ui import upload
 from tests.test_pdf_preview import APP, button
 from tests.test_planning_ui import create_plan, visible_text
-from tutor.assessment.questions import Question
 from tutor.materials.outline import Outline, Topic
 from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
 
@@ -69,19 +68,3 @@ class LearnerUITests(unittest.TestCase):
         self.assertEqual(self.app.session_state["planned_weak"], ("unit-3",))
         self.assertIn("Assignment · Not checked yet", self.status_text())
         self.assertNotIn("More time for: Assignment", self.plan_text())
-
-    def test_practice_answers_update_the_unit_status(self):
-        question = Question(
-            kind="multiple_choice", prompt="Which value is assigned?", options=("2", "3"), correct_index=0,
-            explanation="x = 2 stores 2.", origin="generated", source_ids=("p1",), answer_origin="reference",
-        )
-        self.generate.side_effect = [(question,), (), ()]
-        self.plan(1)
-        button(self.app.main.container("plan_panel"), "Generate daily practice").click().run()
-        self.app.radio[0].set_value("3").run()
-        button(self.app, "Check answer").click().run()
-        self.assertIn("Assignment · Needs more evidence", self.status_text())
-        self.assertIn("0 of 1 answers correct", self.status_text())
-        state = self.app.session_state["learner_state"]
-        (answer,) = state.answers()
-        self.assertEqual((answer.unit_id, answer.correct, answer.source), ("unit-1", False, "practice"))

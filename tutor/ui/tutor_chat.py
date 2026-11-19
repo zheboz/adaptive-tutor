@@ -15,10 +15,10 @@ from tutor.ui.citations import render_sources
 def qa_session(pages: Sequence[PdfPage]) -> QASession:
     session = st.session_state.get("qa_session")
     if session is None:
-        # Share the passage index with daily practice.
-        if "practice_index" not in st.session_state:
-            st.session_state.practice_index = retrieval.build_index(pages)
-        session = start_qa(pages, st.session_state.practice_index)
+        # Share the passage index with the initial quiz.
+        if "passage_index" not in st.session_state:
+            st.session_state.passage_index = retrieval.build_index(pages)
+        session = start_qa(pages, st.session_state.passage_index)
         st.session_state.qa_session = session
     return session
 

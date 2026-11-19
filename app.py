@@ -7,7 +7,6 @@ from tutor.llm import LLMError
 from tutor.materials import outline
 from tutor.materials.ingest import PdfInputError, PdfPage, read_pdf_pages
 from tutor.ui import check, learner, quiz, tutor_chat
-from tutor.ui import practice as practice_ui
 from tutor.ui.citations import render_sources
 from tutor.ui.reader import READER_PANEL_HEIGHT, render_extracted_text, render_pdf_preview
 
@@ -16,7 +15,7 @@ def reset_preview() -> None:
     for key in (
         "pdf_pages", "pdf_page_number", "study_outline", "unit_plan", "study_units",
         "study_plan", "study_target_days", "planned_days", "study_day",
-        "practice_index", "practice_sets", "practice_answers", "practice_skips",
+        "passage_index",
         "learner_state", "planned_weak", "qa_session", *check.CHECK_KEYS, *quiz.QUIZ_KEYS,
     ):
         st.session_state.pop(key, None)
@@ -69,7 +68,7 @@ def render_plan_controls(result: outline.Outline) -> None:
             st.rerun()
 
 
-def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
+def render_study_plan(pages: list[PdfPage]) -> None:
     planned_days = st.session_state.planned_days
     units = st.session_state.study_units
     learner.learner_state(units)
@@ -78,7 +77,7 @@ def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
     if not days or not hasattr(days[0], "assignments"):
         days = planning.schedule_units(units, planned_days, st.session_state.get("planned_weak", ()))
         st.session_state.study_plan = days
-    if check.render_check(units):
+    if check.render_check(units, pages):
         return
     days = st.session_state.study_plan
     st.text(f"{planned_days}-day plan · {len(units)} study unit{'s' if len(units) != 1 else ''}")
@@ -106,10 +105,7 @@ def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
     if number > len(days):
         st.info("Optional review day. Choose an earlier day to revisit its reading or repeat a study task.")
         return
-    assignments = days[number - 1].assignments
-    scopes = [(practice_ui.practice_key(document_id, assignment), assignment) for assignment in assignments]
-    practice_ui.prepare_daily_practice(scopes, pages)
-    for scope, assignment in scopes:
+    for assignment in days[number - 1].assignments:
         unit = assignment.unit
         action = assignment.kind.capitalize()
         task = ""
@@ -119,8 +115,7 @@ def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
             f"<p><strong>{action} · {escape(unit.title)}</strong><br>{escape(unit.objective)}</p>{task}"
         )
         render_sources(assignment.source_ids, f"plan_citation_{number}_{unit.unit_id}")
-        practice_ui.render_questions(scope, unit.unit_id)
-    check.render_daily_check_button(units, pages, days, number)
+    check.render_daily_check_button(number)
 
 
 def tutor_context(result: outline.Outline) -> dict:
@@ -229,7 +224,7 @@ def main() -> None:
         if has_plan:
             st.header("Daily study plan")
             with st.container(height=READER_PANEL_HEIGHT, border=True, key="plan_panel"):
-                render_study_plan(pages, upload.file_id)
+                render_study_plan(pages)
         elif checking:
             st.header("Initial quiz")
             with st.container(height=READER_PANEL_HEIGHT, border=True, key="quiz_panel"):

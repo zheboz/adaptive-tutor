@@ -36,12 +36,12 @@ def done() -> bool:
 
 
 def _build(result: Outline, units: Sequence[StudyUnit], pages: Sequence[PdfPage], topics: list[int]) -> None:
-    if "practice_index" not in st.session_state:
-        st.session_state.practice_index = retrieval.build_index(pages)
+    if "passage_index" not in st.session_state:
+        st.session_state.passage_index = retrieval.build_index(pages)
     count = len(topics)
     try:
         with st.spinner(f"Preparing {count} question{'s' if count != 1 else ''} from your material…"):
-            quiz = build_quiz(result, units, st.session_state.practice_index, topics)
+            quiz = build_quiz(result, units, st.session_state.passage_index, topics)
     except LLMError as error:
         st.session_state.quiz = {"topics": topics, "quiz": None, "results": None, "error": str(error)}
         return

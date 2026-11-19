@@ -1,8 +1,9 @@
-"""The daily check in the plan panel: after a day's practice, the ReAct agent may ask follow-up
-questions, then the rest of the plan is adjusted.
+"""The daily check in the plan panel: after studying a day, the learner asks to be checked.
 
-Each answer is submitted in the main script run so a spinner can show while the tutor chooses the
-next step, and feedback on it appears before the next question.
+Questions are prepared from that day's pages only. When none can be made, the panel says why;
+otherwise the ReAct agent asks up to three of them and the rest of the plan is adjusted. Each answer
+is submitted in the main script run so a spinner can show while the tutor chooses the next step,
+and feedback on it appears before the next question.
 """
 
 from collections.abc import Sequence
@@ -14,16 +15,14 @@ from tutor.agent.bank import QuestionBank
 from tutor.agent.loop import Ask, Done, advance, start_session
 from tutor.agent.replan import PlanChange, after_daily_check
 from tutor.agent.tools import daily_config
-from tutor.llm import LLMError, tracing
+from tutor.llm import LLMError, Trace, tracing
 from tutor.materials.ingest import PdfPage
 from tutor.planning import StudyDay, StudyUnit
 from tutor.ui.feedback import render_feedback
 from tutor.ui.learner import learner_state
 
 
-CHECK_KEYS = ("check", "plan_changes", "completed_days", "diagnostic_bank")
-# The first units a check is likely to ask about are prepared in the background.
-PREFETCH_UNITS = 3
+CHECK_KEYS = ("check", "plan_changes", "completed_days", "day_banks")
 
 
 def reset_progress() -> None:
@@ -32,12 +31,14 @@ def reset_progress() -> None:
         st.session_state.pop(key, None)
 
 
-def question_bank(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> QuestionBank:
-    bank = st.session_state.get("diagnostic_bank")
-    if bank is None or bank.unit_ids != tuple(unit.unit_id for unit in units):
-        bank = QuestionBank(units, pages)
-        st.session_state.diagnostic_bank = bank
-    return bank
+def day_bank(units: Sequence[StudyUnit], pages: Sequence[PdfPage], day: StudyDay) -> QuestionBank:
+    """One bank per study day's material, so checking the day again offers questions not yet asked."""
+    key = tuple((a.unit.unit_id, a.kind, a.source_ids, a.round) for a in day.assignments)
+    banks = st.session_state.setdefault("day_banks", {})
+    if key not in banks or banks[key].unit_ids != tuple(unit.unit_id for unit in units):
+        prefix = "-".join(f"{a.kind}{a.round}-{'.'.join(a.source_ids)}" for a in day.assignments)
+        banks[key] = QuestionBank(units, pages, day.assignments, prefix=f"{prefix}:")
+    return banks[key]
 
 
 def completed_days() -> set[int]:
@@ -48,14 +49,41 @@ def plan_changes() -> list[PlanChange]:
     return st.session_state.setdefault("plan_changes", [])
 
 
-def start_daily_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage], days: Sequence[StudyDay], day: int) -> None:
-    today = [assignment.unit.unit_id for assignment in days[day - 1].assignments]
-    bank = question_bank(units, pages)
-    session = start_session(units, learner_state(units), bank, daily_config(units, today, day))
-    with tracing(session.trace):
-        bank.prefetch(today[:PREFETCH_UNITS])
-    st.session_state.check = {"day": day, "session": session, "step": None, "error": None,
-                              "applied": False, "change": None, "answered": []}
+def start_daily_check(day: int) -> None:
+    """Questions are prepared when the panel next renders, where a spinner can show."""
+    st.session_state.check = {"day": day, "session": None, "step": None, "error": None,
+                              "applied": False, "change": None, "answered": [], "empty": None}
+
+
+def _prepare(check: dict[str, Any], units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> None:
+    """Build today's questions; start the agent only on units that have some."""
+    days = st.session_state.study_plan
+    day = days[check["day"] - 1]
+    today = list(dict.fromkeys(assignment.unit.unit_id for assignment in day.assignments))
+    bank = day_bank(units, pages, day)
+    state = learner_state(units)
+    used = {answer.question_id for answer in state.answers()}
+    trace = Trace()
+    try:
+        with st.spinner("Preparing questions from today's material…"), tracing(trace):
+            bank.prepare(today)
+    except LLMError as error:
+        check["error"] = str(error)
+        return
+    askable = [unit_id for unit_id in today if bank.remaining(unit_id, used)]
+    if not askable:
+        titles = {unit.unit_id: unit.title for unit in units}
+
+        def reason(unit_id: str) -> str:
+            if bank.remaining(unit_id, ()):
+                return "Every question from today's pages has been asked already."
+            return bank.problems.get(unit_id) or "The pages have no point the tutor could ask about."
+
+        check["empty"] = [(titles[unit_id], reason(unit_id)) for unit_id in today]
+        return
+    session = start_session(units, state, bank, daily_config(units, today, check["day"], askable))
+    session.trace.spans.extend(trace.spans)
+    check["session"] = session
 
 
 def end_check() -> None:
@@ -91,14 +119,13 @@ def _apply(check: dict[str, Any]) -> None:
     check["applied"] = True
 
 
-def render_daily_check_button(units: Sequence[StudyUnit], pages: Sequence[PdfPage],
-                              days: Sequence[StudyDay], day: int) -> None:
+def render_daily_check_button(day: int) -> None:
     st.divider()
     checked = day in completed_days()
     st.button("Check my understanding" if not checked else "Check again", key=f"daily_check_{day}",
-              on_click=start_daily_check, args=(units, pages, days, day))
-    st.caption("The tutor looks at today's practice answers and may ask up to 3 more questions, "
-               "then adjusts the rest of the plan.")
+              on_click=start_daily_check, args=(day,))
+    st.caption("When you have studied today's material, the tutor asks up to 3 questions from today's "
+               "pages, shows the answers with their sources, and adjusts the rest of the plan.")
 
 
 def _evidence_line(check: dict[str, Any]) -> str:
@@ -112,16 +139,23 @@ def _evidence_line(check: dict[str, Any]) -> str:
     return "; ".join(parts)
 
 
-def render_check(units: Sequence[StudyUnit]) -> bool:
+def render_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> bool:
     """Show the active check. Returns True while a check occupies the plan panel."""
     check = st.session_state.get("check")
     if not check:
         return False
-    session = check["session"]
     titles = {unit.unit_id: unit.title for unit in units}
     st.subheader(f"Day {check['day']} check")
 
-    if check["step"] is None and not check["error"]:
+    if check["session"] is None and check["empty"] is None and not check["error"]:
+        _prepare(check, units, pages)
+    if check["empty"] is not None:
+        st.info("There is nothing to check from today's material, so the plan is unchanged.")
+        for title, reason in check["empty"]:
+            st.caption(f"{title}: {reason}")
+        st.button("Continue", key="check_close", type="primary", on_click=end_check)
+        return True
+    if check["session"] is not None and check["step"] is None and not check["error"]:
         _advance(check, None)
     if check["error"]:
         st.error(check["error"])
@@ -132,6 +166,7 @@ def render_check(units: Sequence[StudyUnit]) -> bool:
                 st.rerun()
             st.button("Stop check", key="check_stop", on_click=end_check)
         return True
+    session = check["session"]
 
     step = check["step"]
     answered = check["answered"]

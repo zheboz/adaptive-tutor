@@ -1,4 +1,4 @@
-"""Link outline topics, planned readings, and practice questions to the PDF reader."""
+"""Link outline topics, planned readings, and question sources to the PDF reader."""
 
 from collections.abc import Sequence
 

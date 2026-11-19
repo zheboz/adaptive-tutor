@@ -39,10 +39,15 @@ class DiagnosticQuestion:
 
 
 class QuestionBank:
-    """Questions come from the existing verified practice pipeline, so each cites the learner's material."""
+    """Questions come from the verified question pipeline, so each cites the learner's material."""
 
-    def __init__(self, units: Sequence[StudyUnit], pages: Sequence[PdfPage]):
+    def __init__(self, units: Sequence[StudyUnit], pages: Sequence[PdfPage],
+                 assignments: Sequence[StudyAssignment] = (), prefix: str = ""):
+        """`assignments` limit a unit's questions to those pages, such as one study day's reading;
+        `prefix` keeps their question IDs apart from other banks'."""
         self._units = {unit.unit_id: unit for unit in units}
+        self._assignments = {assignment.unit.unit_id: assignment for assignment in assignments}
+        self._prefix = prefix
         self._pages = pages
         self._index: retrieval.PassageIndex | None = None
         self._questions: dict[str, tuple[DiagnosticQuestion, ...]] = {}
@@ -64,9 +69,9 @@ class QuestionBank:
     def _build(self, unit_id: str) -> tuple[DiagnosticQuestion, ...]:
         index = self._passage_index()
         unit = self._units[unit_id]
-        assignment = StudyAssignment(unit, "study", unit.source_ids)
+        assignment = self._assignments.get(unit_id) or StudyAssignment(unit, "study", unit.source_ids)
         passages = retrieval.retrieve(index, assignment)
-        scope = set(unit.source_ids)
+        scope = set(assignment.source_ids)
         reading = [passage for passage in index.passages if passage.source_id in scope]
         try:
             built = questions.generate_questions(
@@ -84,7 +89,8 @@ class QuestionBank:
             if _identity(question) not in seen:
                 seen.add(_identity(question))
                 distinct.append(question)
-        return tuple(DiagnosticQuestion(f"{unit_id}:q{n}", unit_id, q) for n, q in enumerate(distinct, 1))
+        return tuple(DiagnosticQuestion(f"{self._prefix}{unit_id}:q{n}", unit_id, q)
+                     for n, q in enumerate(distinct, 1))
 
     def prefetch(self, unit_ids: Iterable[str]) -> None:
         """Start building questions for these units in the background.
@@ -106,6 +112,14 @@ class QuestionBank:
         future = self._pending.pop(unit_id, None)
         # A failed request is not cached, so the next pick retries it.
         self._questions[unit_id] = future.result() if future is not None else self._build(unit_id)
+
+    def prepare(self, unit_ids: Iterable[str]) -> dict[str, int]:
+        """Build questions for these units now, in parallel; return how many each has."""
+        unit_ids = [unit_id for unit_id in unit_ids if unit_id in self._units]
+        self.prefetch(unit_ids)
+        for unit_id in unit_ids:
+            self._ensure(unit_id)
+        return {unit_id: len(self._questions[unit_id]) for unit_id in unit_ids}
 
     def pick(self, unit_id: str, exclude: Collection[str]) -> DiagnosticQuestion | None:
         """Return an unused question for the unit; model errors propagate to the caller."""

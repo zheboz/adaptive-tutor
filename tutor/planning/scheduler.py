@@ -22,7 +22,7 @@ class StudyAssignment:
     unit: StudyUnit
     kind: Literal["study", "read", "apply", "review"]
     source_ids: tuple[str, ...]
-    # Counts a unit's review sessions from 1, so each review gets its own practice.
+    # Counts a unit's review sessions from 1, so each review gets its own check questions.
     round: int = 0
 
 

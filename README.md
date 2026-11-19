@@ -1,6 +1,6 @@
 # Adaptive Tutor
 
-Adaptive Tutor turns a PDF into a study outline, a daily plan, and practice questions linked to their source pages. Upload lecture notes, generate an outline, and choose how many days to spend on the material. Each study day includes the option to practice what was assigned.
+Adaptive Tutor turns a PDF into a study outline, a daily plan, and checks whose questions link to their source pages. Upload lecture notes, generate an outline, and choose how many days to spend on the material. Each study day includes the option to practice what was assigned.
 
 The planned tutoring workflow will use the learner’s goals, deadline, and answers to schedule study sessions. The first course will cover variable updates, loop counts, and loop tracing in Python.
 
@@ -53,12 +53,6 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 2. Choose a **Study day** to see its learning content and open the cited pages. A short plan groups complete units together. A longer plan can put the reading on one or more days and the unit's study task on the next. Any days left after all readings and tasks are marked for optional review.
 3. To adjust the pace, change the duration and submit again. Python redistributes the same units locally. The plan stays available while browsing the PDF in the current session and clears when the PDF changes.
 
-### Practicing a day's material
-
-1. Choose a study day and click **Generate daily practice** in the plan panel. Each assigned learning item gets 1–5 single-answer multiple-choice or true/false questions. Optional review days point back to the earlier assignments.
-2. The app indexes readable PDF passages locally and ranks them with BM25. It retrieves passages from the assigned pages and looks elsewhere in the same document for related exercises, including chapter-end questions. OpenAI uses these excerpts to reuse, adapt, or write questions. Each question links to its source pages and shows its origin.
-3. Select an option and click **Check answer** to see feedback and the source of the answer. The app distinguishes a verified PDF answer key, an answer taken directly from the assigned reading, and a model reference answer. If model drafts fail validation, the app can use a clearly keyed exercise or build a fill-in-the-blank check from a numeric value in a relevant sentence on the assigned pages. When neither is available, the day shows that the reading had too little evidence for practice. Pages that teach nothing to assess, such as a title slide, an agenda, course logistics or references, get no practice: the app skips them when it finds no teaching point or exercise, and the model can also decline them. Either way the plan shows the reason. Questions and submitted answers follow the same unit and cited pages when you change days or adjust the schedule. They are kept in the current PDF session.
-
 ### Initial quiz, then the plan
 
 1. After the outline appears, check **I don't understand this** under the topics you find unclear.
@@ -81,7 +75,9 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 
 ### Checking your understanding each day
 
-After a day's practice, select **Check my understanding**. The tutor reads that day's practice answers and asks up to three more questions about that day's and earlier units, choosing each from your earlier answers and showing why. After every answer you see whether it was right, the correct answer, an explanation, and the supporting passage with a link to its page. It reports a confirmed gap only after at least two wrong answers on a unit that outnumber the correct ones. It then continues, adds a review of today's unit after its remaining study days, or adds a review of an earlier unit; a review already planned later is not added twice.
+Study a day's readings and task, then select **Check my understanding** at the bottom of the day. Only then are questions prepared, from that day's pages alone; a review day gets fresh questions. When the day's pages have nothing the tutor can ask about, it says so for each unit and leaves the plan unchanged.
+
+Otherwise the tutor asks up to three questions, choosing each from your earlier answers and showing why. After every answer you see whether it was right, the correct answer, an explanation, and the supporting passage with a link to its page; at the end every answer is listed again. It reports a confirmed gap only after at least two wrong answers on a unit that outnumber the correct ones. It then continues, adds a review of today's unit after its remaining study days, or, when your earlier answers show the cause is an earlier unit, adds a review of that unit. A review already planned later is not added twice.
 
 The plan shows your goal, how many days the plan now has, and how many you have checked. When reviews make the plan longer than your goal, it says by how much. **Plan changes** lists each change and the answers behind it.
 

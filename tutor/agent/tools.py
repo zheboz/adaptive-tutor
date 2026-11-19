@@ -3,8 +3,9 @@
 The same agent runs two kinds of check, configured by ``CheckConfig``:
 
 - initial: before studying, check the units the learner marked weak (up to 5 questions, all units)
-- daily:   after a study day's practice, decide whether to continue, review today's material, or
-           revisit an earlier unit (up to 3 follow-up questions, today's and earlier units only)
+- daily:   after a study day, ask up to 3 questions from that day's pages, then decide whether to
+           continue, review today's material, or revisit an earlier unit whose earlier answers show
+           it is the cause
 """
 
 from collections.abc import Sequence
@@ -30,18 +31,26 @@ class CheckConfig:
     next_steps: tuple[str, ...]
     today: tuple[str, ...] = ()
     day: int | None = None
+    # Units the tutor may ask about; empty means every unit in scope.
+    ask_scope: tuple[str, ...] = ()
+
+    @property
+    def askable(self) -> tuple[str, ...]:
+        return self.ask_scope or self.scope
 
 
 def initial_config(units: Sequence[StudyUnit]) -> CheckConfig:
     return CheckConfig("initial", tuple(unit.unit_id for unit in units), MAX_QUESTIONS, INITIAL_STEPS)
 
 
-def daily_config(units: Sequence[StudyUnit], today: Sequence[str], day: int) -> CheckConfig:
-    """Today's units and every unit before them in study order."""
+def daily_config(units: Sequence[StudyUnit], today: Sequence[str], day: int,
+                 askable: Sequence[str] | None = None) -> CheckConfig:
+    """Questions only about today's units (those with questions); conclusions may name earlier units."""
     order = [unit.unit_id for unit in units]
     today = tuple(dict.fromkeys(unit_id for unit_id in today if unit_id in order))
     last = max(order.index(unit_id) for unit_id in today)
-    return CheckConfig("daily", tuple(order[:last + 1]), DAILY_QUESTIONS, DAILY_STEPS, today, day)
+    ask = tuple(unit_id for unit_id in (today if askable is None else askable) if unit_id in today)
+    return CheckConfig("daily", tuple(order[:last + 1]), DAILY_QUESTIONS, DAILY_STEPS, today, day, ask or today)
 
 
 @dataclass(frozen=True)
@@ -79,7 +88,7 @@ def tool_schemas(units: Sequence[StudyUnit], config: CheckConfig | None = None) 
                            f"answer is returned as this call's output. At most {config.max_questions} per check.",
             "strict": True,
             "parameters": _object({
-                "unit_id": {"type": "string", "enum": unit_ids},
+                "unit_id": {"type": "string", "enum": list(config.askable)},
                 "reason": {"type": "string", "description": "Why this unit, given the evidence so far."},
             }),
         },
@@ -192,6 +201,6 @@ def fallback_diagnosis(state: LearnerState, config: CheckConfig | None = None) -
     return Diagnosis(
         primary_gap=likely, status="uncertain", evidence=evidence, next_step=next_step,
         summary="The tutor stopped before it had enough evidence for a conclusion. "
-                "Practice the unit below and check again later.",
+                "Review this unit and check again later.",
         forced=True,
     )
