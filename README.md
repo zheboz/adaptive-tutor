@@ -39,7 +39,7 @@ Then open the app, enter your OpenAI API key under **OpenAI settings**, and choo
 
 Open **OpenAI settings** at the top of the sidebar and enter your OpenAI API key. It is hidden as you type; **Show API key** reveals it. The key is used only in your browser session: it is not saved, not shown to anyone else, and not written to the server's environment, so other people using the same app never use it.
 
-Once your key is entered, **Model** lists the chat models your account can use (for example `gpt-5.6-luna` or `gpt-6-luna`); **Other…** accepts any model ID. The default is `gpt-4.1-mini`. The tutor needs a model that supports tool calls and structured outputs; if one fails, switch back to the default. Your key and model apply to everything in your session: the outline, the plan, the quiz, the daily checks and Ask the tutor.
+**Model** starts with the default, `gpt-4.1-mini`, then recommended models from the newest (`gpt-6.2-sol`, `gpt-6-luna`, `gpt-5.6-luna` and others) down to `gpt-4o-mini`; each was checked with tool calls and structured outputs. Once your key is entered, the list keeps the recommended models your account has and adds its other chat models after them; **Other…** accepts any model ID. Pro models work but take about 50 seconds a call. The tutor needs a model that supports tool calls and structured outputs; if one fails, switch back to the default. Your key and model apply to everything in your session: the outline, the plan, the quiz, the daily checks and Ask the tutor.
 
 The app never uses a key from the server's environment: without your key, nothing is sent to OpenAI.
 

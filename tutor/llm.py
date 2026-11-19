@@ -230,7 +230,7 @@ def call_with_tools(
 
 # Models that cannot answer in text with tools, and dated snapshots, are left out of the picker.
 _NOT_CHAT = ("embedding", "tts", "whisper", "dall-e", "image", "audio", "realtime", "moderation",
-             "transcribe", "babbage", "davinci", "sora", "search")
+             "transcribe", "babbage", "davinci", "sora", "search", "gpt-live")
 _SNAPSHOT = re.compile(r"-\d{4}-\d{2}-\d{2}$")
 
 

@@ -184,7 +184,7 @@ class CredentialTests(unittest.TestCase):
         models = self.sdk.return_value.__enter__.return_value.models.list
         models.return_value = [SimpleNamespace(id=i) for i in (
             "gpt-4.1-mini", "gpt-6-luna", "text-embedding-3-small", "gpt-4o-2024-08-06", "tts-1", "o3",
-            "gpt-image-1", "gpt-5.6-luna",
+            "gpt-image-1", "gpt-5.6-luna", "gpt-live-1",
         )]
         self.assertEqual(list_models("learner-key"), ["gpt-4.1-mini", "gpt-5.6-luna", "gpt-6-luna", "o3"])
         self.assertEqual(self.sdk.call_args.kwargs["api_key"], "learner-key")

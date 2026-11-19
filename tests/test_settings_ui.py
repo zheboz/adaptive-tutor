@@ -15,7 +15,7 @@ class SettingsUITests(unittest.TestCase):
     def setUp(self):
         self.env = self.enterContext(patch.dict(os.environ, {}, clear=True))
         self.models = self.enterContext(patch("tutor.ui.settings.list_models"))
-        self.models.return_value = ["gpt-4.1-mini", "gpt-5.6-luna", "gpt-6-luna", "o3"]
+        self.models.return_value = ["gpt-4.1-mini", "gpt-5.6-luna", "gpt-6-luna", "o3", "chat-latest"]
         self.app = AppTest.from_file(APP).run()
 
     def key_input(self):
@@ -36,7 +36,9 @@ class SettingsUITests(unittest.TestCase):
         self.key_input().set_value("sk-learner").run()
         self.models.assert_called_once_with("sk-learner")
         model = self.app.sidebar.selectbox(key="model_choice")
-        self.assertEqual(model.options, ["gpt-4.1-mini", "gpt-5.6-luna", "gpt-6-luna", "o3", "Other…"])
+        # The default, then recommended models the account has (newest first), then its other models.
+        self.assertEqual(model.options, ["gpt-4.1-mini (default)", "gpt-6-luna", "gpt-5.6-luna", "o3",
+                                         "chat-latest", "Other…"])
         self.assertEqual(model.value, "gpt-4.1-mini")
         self.assertIn("Using your key.", [c.value for c in self.app.sidebar.caption])
         model.set_value("gpt-6-luna").run()
@@ -72,7 +74,15 @@ class SettingsUITests(unittest.TestCase):
         self.models.side_effect = LLMError("OpenAI rejected the credentials. Check the app's API key.")
         self.key_input().set_value("sk-wrong").run()
         self.assertIn("rejected the credentials", self.app.sidebar.error[0].value)
-        self.assertEqual(self.app.sidebar.selectbox(key="model_choice").options[0], "gpt-4.1-mini")
+        self.assertEqual(self.app.sidebar.selectbox(key="model_choice").options[0], "gpt-4.1-mini (default)")
+
+    def test_before_a_key_the_newest_recommended_models_are_offered(self):
+        options = self.app.sidebar.selectbox(key="model_choice").options
+        self.assertEqual(options[:3], ["gpt-4.1-mini (default)", "gpt-6.2-sol", "gpt-6.2-astra"])
+        self.assertIn("gpt-6-luna", options)
+        self.assertIn("gpt-5.6-luna", options)
+        self.assertEqual(options[-1], "Other…")
+        self.assertEqual(len(options), 25)
 
     def test_a_server_key_is_never_used_or_shown(self):
         self.env["OPENAI_API_KEY"] = "sk-server-secret"
