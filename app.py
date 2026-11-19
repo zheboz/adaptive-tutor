@@ -9,6 +9,7 @@ from tutor.materials import outline
 from tutor.materials.citations import render_sources
 from tutor.materials.ingest import PdfInputError, PdfPage, read_pdf_pages
 from tutor.materials.reader import READER_PANEL_HEIGHT, render_extracted_text, render_pdf_preview
+from tutor.ui import learner, tutor_chat
 
 
 def reset_preview() -> None:
@@ -16,8 +17,10 @@ def reset_preview() -> None:
         "pdf_pages", "pdf_page_number", "study_outline", "unit_plan", "study_units",
         "study_plan", "study_target_days", "planned_days", "study_day",
         "practice_index", "practice_sets", "practice_answers", "practice_skips",
+        "learner_state", "planned_weak", "qa_session",
     ):
         st.session_state.pop(key, None)
+    learner.clear_weak_topics()
 
 
 def render_plan_controls(result: outline.Outline) -> None:
@@ -30,6 +33,7 @@ def render_plan_controls(result: outline.Outline) -> None:
             "Target duration (days)", min_value=1, value=7, step=1, key="study_target_days",
             help="Choose how many days to spend on the full outline.",
         )
+        st.caption("Topics you check as weak in the outline get more of the time.")
         create_plan = st.form_submit_button(
             "Create study plan", help="OpenAI prepares the study tasks once. Changing the duration reuses them."
         )
@@ -45,21 +49,27 @@ def render_plan_controls(result: outline.Outline) -> None:
         except (LLMError, planning.PlanningError) as error:
             st.error(str(error))
             return
-        if st.session_state.get("planned_days") != target_days:
+        weak = learner.apply_plan_inputs(st.session_state.study_units)
+        if st.session_state.get("planned_days") != target_days or st.session_state.get("planned_weak") != weak:
             st.session_state.pop("study_plan", None)
             st.session_state.planned_days = target_days
+            st.session_state.planned_weak = weak
             st.session_state.study_day = 1
 
 
 def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
     planned_days = st.session_state.planned_days
     units = st.session_state.study_units
+    learner.learner_state(units)
     days = st.session_state.get("study_plan")
     # An open session can still hold a schedule made by the previous version.
     if not days or not hasattr(days[0], "assignments"):
-        days = planning.schedule_units(units, planned_days)
+        days = planning.schedule_units(units, planned_days, st.session_state.get("planned_weak", ()))
         st.session_state.study_plan = days
     st.text(f"{planned_days}-day plan · {len(units)} study unit{'s' if len(units) != 1 else ''}")
+    weak = set(st.session_state.get("planned_weak", ()))
+    if weak:
+        st.caption("More time for: " + "; ".join(unit.title for unit in units if unit.unit_id in weak))
     if planned_days > len(days):
         start = len(days) + 1
         label = f"Day {start}" if start == planned_days else f"Days {start}–{planned_days}"
@@ -83,7 +93,24 @@ def render_study_plan(pages: list[PdfPage], document_id: str) -> None:
             f"<p><strong>{action} · {escape(unit.title)}</strong><br>{escape(unit.objective)}</p>{task}"
         )
         render_sources(assignment.source_ids, f"plan_citation_{number}_{unit.unit_id}")
-        practice_ui.render_questions(scope)
+        practice_ui.render_questions(scope, unit.unit_id)
+
+
+def tutor_context(result: outline.Outline) -> dict:
+    """What the tutor should know about the learner when answering a question."""
+    context: dict = {"weak_topics": [
+        result.topics[number - 1].title for number in sorted(learner.weak_topic_numbers())
+        if number <= len(result.topics)
+    ]}
+    days = st.session_state.get("study_plan")
+    number = st.session_state.get("study_day")
+    if days and number and number <= len(days):
+        context["study_day"] = number
+        context["todays_units"] = [
+            {"title": a.unit.title, "objective": a.unit.objective, "pages": list(a.source_ids)}
+            for a in days[number - 1].assignments
+        ]
+    return context
 
 
 def prepare_outline(pages: list[PdfPage]) -> outline.Outline | None:
@@ -115,8 +142,10 @@ def render_outline(result: outline.Outline | None, height: int) -> None:
         if result is None:
             st.caption("Select Generate outline in the sidebar to see the topics and their source pages.")
             return
+        st.caption("Check the topics you find weak or unclear. They are used when you select Create study plan.")
         for index, topic in enumerate(result.topics):
             st.html(f"<h3>{escape(topic.title)}</h3><p>{escape(topic.summary)}</p>")
+            learner.render_weak_topic_checkbox(index)
             render_sources(topic.source_ids, f"citation_{index}")
 
 
@@ -172,7 +201,10 @@ def main() -> None:
                 render_study_plan(pages, upload.file_id)
         else:
             render_outline(result, READER_PANEL_HEIGHT)
+    if result is not None:
+        tutor_chat.render_tutor_chat(pages, tutor_context(result), 360)
     if has_plan:
+        learner.render_learning_status(st.session_state.study_units, 280)
         render_outline(result, 320)
     render_extracted_text(page)
 

@@ -5,6 +5,7 @@ from hashlib import sha256
 import streamlit as st
 
 from tutor.assessment import questions, retrieval
+from tutor.assessment.questions import Question
 from tutor.llm import LLMError
 from tutor.materials.citations import render_sources
 from tutor.materials.ingest import PdfPage
@@ -14,6 +15,9 @@ from tutor.planning import StudyAssignment
 def practice_key(document_id: str, assignment: StudyAssignment) -> str:
     # Dates can change. The document, unit and assigned reading identify the material.
     parts = [document_id, assignment.unit.unit_id, *sorted(set(assignment.source_ids))]
+    if assignment.kind == "review":
+        # A review day revisits the same pages as the unit's task, with fresh questions.
+        parts.append("review")
     return sha256("|".join(parts).encode()).hexdigest()
 
 
@@ -54,13 +58,20 @@ def prepare_daily_practice(scopes: list[tuple[str, StudyAssignment]], pages: lis
         action.empty()
 
 
-def _record_answer(answer_key: str, widget_key: str, options: tuple[str, ...]) -> None:
+def _record_answer(answer_key: str, widget_key: str, question: Question, unit_id: str | None) -> None:
     selected = st.session_state.get(widget_key)
-    if selected in options:
-        st.session_state.practice_answers[answer_key] = options.index(selected)
+    if selected not in question.options:
+        return
+    choice = question.options.index(selected)
+    st.session_state.practice_answers[answer_key] = choice
+    # Practice answers are evidence for the unit's status, alongside diagnosis answers.
+    state = st.session_state.get("learner_state")
+    if unit_id is not None and state is not None and unit_id in state.units:
+        state.record(answer_key, unit_id, question.kind, choice == question.correct_index, "practice",
+                     question.prompt)
 
 
-def render_questions(scope: str) -> None:
+def render_questions(scope: str, unit_id: str | None = None) -> None:
     exercises = st.session_state.practice_sets.get(scope)
     if exercises is None:
         return
@@ -90,7 +101,7 @@ def render_questions(scope: str) -> None:
         if submitted is None:
             st.button(
                 "Check answer", key=f"{answer_key}_submit", disabled=selected is None,
-                on_click=_record_answer, args=(answer_key, widget_key, question.options),
+                on_click=_record_answer, args=(answer_key, widget_key, question, unit_id),
             )
         else:
             if submitted == question.correct_index:

@@ -157,3 +157,40 @@ class SchedulerTests(unittest.TestCase):
         for duration in (0, -1, 2.5, True):
             with self.subTest(duration=duration), self.assertRaises((ValueError, TypeError)):
                 schedule_units(self.units, duration)
+
+
+class WeakUnitSchedulingTests(unittest.TestCase):
+    def setUp(self):
+        self.units = tuple(
+            StudyUnit(f"unit-{n}", f"Lesson {n}", f"Learn {n}.", (f"p{n}a", f"p{n}b"), f"Explain {n}.")
+            for n in range(1, 6)
+        )
+
+    def titles(self, days):
+        return [[a.unit.unit_id for a in day.assignments] for day in days]
+
+    def test_a_weak_unit_shares_its_day_with_fewer_units(self):
+        self.assertEqual(self.titles(schedule_units(self.units, 3)),
+                         [["unit-1", "unit-2"], ["unit-3", "unit-4"], ["unit-5"]])
+        self.assertEqual(self.titles(schedule_units(self.units, 3, {"unit-1"})),
+                         [["unit-1"], ["unit-2", "unit-3"], ["unit-4", "unit-5"]])
+        # Every unit is still covered once, in order.
+        days = schedule_units(self.units, 2, {"unit-1", "unit-2", "unknown"})
+        self.assertEqual([a.unit for day in days for a in day.assignments], list(self.units))
+
+    def test_weak_units_get_reading_days_first_then_a_review_day(self):
+        days = schedule_units(self.units, 7, {"unit-4"})
+        plan = [(a.unit.unit_id, a.kind) for day in days for a in day.assignments]
+        # Both extra days go to the weak unit: its two pages get a reading day each.
+        self.assertEqual(plan, [("unit-1", "study"), ("unit-2", "study"), ("unit-3", "study"),
+                                ("unit-4", "read"), ("unit-4", "read"), ("unit-4", "apply"), ("unit-5", "study")])
+        long = [(a.unit.unit_id, a.kind) for day in schedule_units(self.units, 20, {"unit-4"}) for a in day.assignments]
+        self.assertEqual(long.count(("unit-4", "review")), 1)
+        self.assertEqual(long.index(("unit-4", "review")), long.index(("unit-4", "apply")) + 1)
+        self.assertEqual(sum(kind == "review" for _, kind in long), 1)
+        self.assertEqual(len(long), 16)
+
+    def test_no_weak_units_keeps_the_even_plan(self):
+        for days in (2, 4, 9, 30):
+            with self.subTest(days=days):
+                self.assertEqual(schedule_units(self.units, days, ()), schedule_units(self.units, days))

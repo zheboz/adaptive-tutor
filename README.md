@@ -59,6 +59,31 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 2. The app indexes readable PDF passages locally and ranks them with BM25. It retrieves passages from the assigned pages and looks elsewhere in the same document for related exercises, including chapter-end questions. OpenAI uses these excerpts to reuse, adapt, or write questions. Each question links to its source pages and shows its origin.
 3. Select an option and click **Check answer** to see feedback and the source of the answer. The app distinguishes a verified PDF answer key, an answer taken directly from the assigned reading, and a model reference answer. If model drafts fail validation, the app can use a clearly keyed exercise or build a fill-in-the-blank check from a numeric value in a relevant sentence on the assigned pages. When neither is available, the day shows that the reading had too little evidence for practice. Pages that teach nothing to assess, such as a title slide, an agenda, course logistics or references, get no practice: the app skips them when it finds no teaching point or exercise, and the model can also decline them. Either way the plan shows the reason. Questions and submitted answers follow the same unit and cited pages when you change days or adjust the schedule. They are kept in the current PDF session.
 
+### Marking weak topics
+
+After the outline appears, check **I find this weak or unclear** under any topic, then select **Create study plan**. Weak topics get more of the time: in a short plan their units share a day with fewer other units; in a long plan they get extra reading days first and a review day, before other units get extra reading days. Changing the checks takes effect the next time you create the plan.
+
+**Learning status** shows each unit's status and the evidence behind it. A unit marked weak is only suspected until answers check it; practice answers decide whether it is understood or a likely gap. To ask about something specific you don't understand, use **Ask the tutor**.
+
+### Asking the tutor
+
+**Ask the tutor** appears once the outline is ready. Type a question about the material and the tutor answers from your PDF only (agentic RAG):
+
+- It decides what to search for, tries other wording or reads a page when the first search misses, and uses at most three searches per question. Code fragments such as `x = x + 1` are matched word for word.
+- Every answer quotes the pages it relies on. The app checks that each quote appears on the cited page and that the tutor retrieved that page for this question; select a page link to open it beside the chat.
+- When the material doesn't cover the question, the tutor says so and names the missing topic instead of answering from general knowledge.
+- It knows today's study units and the topics you marked as weak, and remembers the last few questions for follow-ups. The caption under the chat shows the model calls and tokens used so far.
+
+### Diagnosing a difficulty (command line)
+
+The diagnosis agent is not in the web app yet. To try it on a PDF, run it in the terminal with the same environment as the app:
+
+```bash
+uv run --no-project --env-file .env -- .venv/bin/python -m tutor.agent.cli path/to/lesson.pdf --trace
+```
+
+The tutor builds the study units, asks which units you find weak, then asks up to five questions from your material. It chooses each question from your earlier answers and shows why. It reports a confirmed gap only after at least two wrong answers on that unit; otherwise its conclusion stays uncertain. `--trace` lists every model call and tool step with its time and tokens.
+
 ## Planned architecture
 
 | Component | Responsibility |
