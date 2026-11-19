@@ -77,11 +77,11 @@ def ensure_plan() -> None:
         )
 
 
-def tutor_context(result: outline.Outline) -> dict:
+def tutor_context(result: outline.Outline | None) -> dict:
     """What the tutor should know about the learner when answering a question."""
+    topics = result.topics if result is not None else []
     context: dict = {"weak_topics": [
-        result.topics[number - 1].title for number in sorted(learner.weak_topic_numbers())
-        if number <= len(result.topics)
+        topics[number - 1].title for number in sorted(learner.weak_topic_numbers()) if number <= len(topics)
     ]}
     days = st.session_state.get("study_plan")
     number = navigation.current_day()
@@ -130,33 +130,37 @@ def current_step(result: outline.Outline | None, has_plan: bool) -> tuple[int, s
     return 5, "study today's material, then select Check my understanding."
 
 
+# The view bar stays at the top of the view panel; the view's content scrolls below it.
+VIEW_CONTENT_HEIGHT = READER_PANEL_HEIGHT - 90
+
+
 def render_views(result: outline.Outline | None, pages: list[PdfPage], has_plan: bool) -> None:
-    """The view beside the PDF. Each view keeps the PDF in sight, so its page links can be followed.
-    Ask the tutor is below both, across the full width."""
+    """The panel beside the PDF: a view bar and the selected view, in one panel as tall as the PDF's,
+    so the two line up. Each view keeps the PDF in sight, so its page links can be followed."""
     units = st.session_state.get("study_units")
     if result is None:
-        navigation.render_view_bar(["Outline"])
-        with st.container(height=READER_PANEL_HEIGHT, border=True, key="outline_panel"):
-            st.caption("Select Generate outline in the sidebar to see the topics and their source pages.")
-        return
-    if has_plan:
+        options = ["Outline"]
+    elif has_plan:
         options = ["Today", "Plan", "Progress"]
     else:
         options = ["Outline", *(["Initial quiz"] if quiz.started() else []), *(["Progress"] if units else [])]
-    view = navigation.render_view_bar(options)
     panels = {"Outline": "outline_panel", "Initial quiz": "quiz_panel", "Today": "plan_panel",
               "Plan": "plan_overview_panel", "Progress": "progress_panel"}
-    with st.container(height=READER_PANEL_HEIGHT, border=True, key=panels[view]):
-        if view == "Outline":
-            views.render_outline_topics(result)
-        elif view == "Initial quiz":
-            quiz.render_quiz(result, units, pages)
-        elif view == "Today":
-            views.render_today(units, pages)
-        elif view == "Plan":
-            views.render_plan_overview(units, result)
-        else:
-            views.render_progress(units)
+    with st.container(height=READER_PANEL_HEIGHT, border=True, key="view_panel"):
+        view = navigation.render_view_bar(options)
+        with st.container(height=VIEW_CONTENT_HEIGHT, border=False, key=panels[view]):
+            if result is None:
+                st.caption("Select Generate outline in the sidebar to see the topics and their source pages.")
+            elif view == "Outline":
+                views.render_outline_topics(result)
+            elif view == "Initial quiz":
+                quiz.render_quiz(result, units, pages)
+            elif view == "Today":
+                views.render_today(units, pages)
+            elif view == "Plan":
+                views.render_plan_overview(units, result)
+            else:
+                views.render_progress(units)
 
 
 def main() -> None:
@@ -208,14 +212,14 @@ def main() -> None:
         ensure_plan()
     views.render_steps(*current_step(result, has_plan))
     preview_column, learning_column = st.columns([3, 2], gap=12)
-    # Both columns open with a row of controls above a panel of the same height, so they line up.
+    # Each column is one panel of the same height, so the two line up.
     with preview_column:
         page = render_pdf_preview(upload, pages)
     with learning_column:
         render_views(result, pages, has_plan)
-    if result is not None:
-        st.header("Ask the tutor")
-        tutor_chat.render_tutor_chat(pages, tutor_context(result), 360)
+    # Asking the tutor needs only the PDF, so it is always available, right below both panels.
+    st.header("Ask the tutor")
+    tutor_chat.render_tutor_chat(pages, tutor_context(result), 360)
     render_extracted_text(page)
 
 

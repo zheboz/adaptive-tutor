@@ -159,8 +159,20 @@ class TutorChatUITests(unittest.TestCase):
         self.app = AppTest.from_file(APP).run()
         self.document = upload(self.app, *[page.text for page in PAGES])
 
-    def test_chat_appears_with_the_outline_and_answers_with_page_links(self):
-        self.assertFalse(self.app.chat_input)
+    def test_the_tutor_is_available_before_the_outline(self):
+        # Asking needs only the PDF, so the chat is there as soon as a PDF is uploaded.
+        self.assertIn("Ask the tutor", [h.value for h in self.app.main.header])
+        model = ScriptedModel(
+            turn("search_material", 1, query="range(3)"),
+            turn("answer", 2, text="It runs 3 times.", citations=[{"page": "p4", "quote": "runs its body 3 times"}]),
+        )
+        with patch("tutor.agent.qa.call_with_tools", side_effect=model):
+            self.app.chat_input(key="tutor_question").set_value("How often does range(3) loop?").run()
+        self.assertFalse(self.app.exception)
+        self.assertEqual(json.loads(model.seen[0][-1]["content"])["context"], {"weak_topics": []})
+        self.assertIn("It runs 3 times.", [m.value for m in self.app.main.container("tutor_chat_panel").markdown])
+
+    def test_chat_answers_with_page_links_and_knows_the_plan(self):
         button(self.app.sidebar, "Generate outline").click().run()
         self.app.checkbox(key="weak_topic_0").check()
         create_plan(self.app, 2)

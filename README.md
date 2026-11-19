@@ -43,12 +43,12 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 
 ### Page layout
 
-A step bar at the top shows where you are (Upload › Outline › Mark & quiz › Plan › Study) and what to do next. The PDF stays on the left, with its page controls in a row above it; on the right, a row of views sits level with those controls, above a panel of the same height:
+A step bar at the top shows where you are (Upload › Outline › Mark & quiz › Plan › Study) and what to do next. The PDF stays on the left in a panel with its page controls at the bottom. On the right, a panel of the same height, so the two line up, holds a row of views at the top; the selected view scrolls below it:
 
 - Before the plan: **Outline** (check the topics you don't understand), **Initial quiz** and **Progress**.
 - After the plan: **Today** (the open study day and its check), **Plan** (goal, length and checked days, every day in a table, plan changes and the outline) and **Progress** (each unit's status and the initial quiz answers).
 
-**Ask the tutor** is below the PDF and the views, across the full width. The text read from the current page is in a collapsed **Extracted text** section at the bottom of the page.
+**Ask the tutor** is always shown right below both panels, across the full width, from the moment a PDF is uploaded: it needs only the PDF, not the outline or the plan. The text read from the current page is in a collapsed **Extracted text** section at the bottom of the page.
 
 Days are picked from a row of buttons: ✓ marks a checked day and ↻ a review day. Page links in any view open the page in the PDF beside it. The app switches to the quiz when it starts and to Today when a plan is created.
 
@@ -77,7 +77,7 @@ Days are picked from a row of buttons: ✓ marks a checked day and ↻ a review 
 
 ### Asking the tutor
 
-**Ask the tutor** appears once the outline is ready. Type a question about the material and the tutor answers from your PDF only (agentic RAG):
+**Ask the tutor** is available as soon as a PDF is uploaded. Type a question about the material and the tutor answers from your PDF only (agentic RAG):
 
 - It decides what to search for, tries other wording or reads a page when the first search misses, and uses at most three searches per question. Code fragments such as `x = x + 1` are matched word for word.
 - Every answer quotes the pages it relies on. The app checks that each quote appears on the cited page and that the tutor retrieved that page for this question; select a page link to open it beside the chat.
