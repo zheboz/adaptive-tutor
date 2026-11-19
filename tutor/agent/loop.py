@@ -57,8 +57,7 @@ units cannot be asked about, but their earlier answers are in the state: when th
 difficulty comes from an earlier unit, name it. next_step: continue when today's material is
 understood; review_today when a unit studied today needs another session; revisit_earlier when the
 difficulty comes from an earlier unit, named in primary_gap. A review day is added to the plan only
-when at least 3 answers in this check are wrong, so when you think a review may be needed, use all of
-your questions before you finish."""
+when at least 2 answers in this check are wrong and they outnumber the right ones."""
 
 
 def instructions(config: CheckConfig) -> str:

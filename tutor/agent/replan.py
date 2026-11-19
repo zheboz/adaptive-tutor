@@ -13,8 +13,9 @@ from .state import LearnerState
 from .tools import Diagnosis
 
 
-# A check adds a review day only when at least this many of its own answers are wrong.
-REVIEW_MIN_WRONG = 3
+# A check adds a review day only when at least this many of its own answers are wrong, and they
+# outnumber the right ones: the same standard as a likely gap (2 of 2, 2 of 3, 3 of 3).
+REVIEW_MIN_WRONG = 2
 
 
 @dataclass(frozen=True)
@@ -37,8 +38,8 @@ def after_daily_check(
 ) -> tuple[tuple[StudyDay, ...], PlanChange | None]:
     """Add a review day at the end of the plan when the check calls for one.
 
-    `asked` are the questions of this check. With fewer than REVIEW_MIN_WRONG of them answered
-    wrong, no review is added, whatever the tutor concluded.
+    `asked` are the questions of this check. Unless at least REVIEW_MIN_WRONG of them are wrong and
+    the wrong ones outnumber the right ones, no review is added, whatever the tutor concluded.
     """
     days = tuple(days)
     if diagnosis.primary_gap:
@@ -56,10 +57,12 @@ def after_daily_check(
     trigger = f"Day {day} check"
     answers = [state.answer(question_id) for question_id in asked]
     wrong = sum(answer is not None and not answer.correct for answer in answers)
-    if wrong < REVIEW_MIN_WRONG:
+    right = sum(answer is not None and answer.correct for answer in answers)
+    if wrong < REVIEW_MIN_WRONG or wrong <= right:
         return days, PlanChange(
-            trigger, f"No review was added: {wrong} of {len(asked)} answers in this check were wrong, and a "
-                     f"review is added only after {REVIEW_MIN_WRONG} wrong answers.",
+            trigger, f"No review was added: {wrong} of {len(asked)} answers in this check were wrong. A "
+                     f"review is added when at least {REVIEW_MIN_WRONG} answers are wrong and they outnumber "
+                     "the right ones.",
             diagnosis.evidence, changed=False,
         )
     planned = [d.number for d in days[day:]

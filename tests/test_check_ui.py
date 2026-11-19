@@ -95,30 +95,30 @@ class CheckUITests(unittest.TestCase):
         self.assertIn("Day 1 · checked", [s.value for s in self.panel().subheader])
         self.assertIn("1 checked · 2 to go", self.text())
 
-        # Day 2: two wrong answers and one right one add no review.
+        # Day 2: one wrong answer and two right ones add no review.
         self.app.number_input(key="study_day").set_value(2).run()
         self.model.turns += [
             turn("ask_question", 3, unit_id="unit-2", reason="Check updates."),
             turn("ask_question", 4, unit_id="unit-2", reason="Once more."),
             turn("ask_question", 5, unit_id="unit-2", reason="A third time."),
-            turn("finish", 6, primary_gap="unit-2", status="confirmed",
-                 evidence=[qid("unit-2", 1), qid("unit-2", 2)], next_step="review_today",
-                 summary="x = x + 1 is not clear yet."),
+            turn("finish", 6, primary_gap="unit-2", status="uncertain",
+                 evidence=[qid("unit-2", 1)], next_step="review_today",
+                 summary="One slip on x = x + 1."),
         ]
         button(self.panel(), "Check my understanding").click().run()
         self.answer(qid("unit-2", 1), "3")
         text = self.text()
         self.assertIn("Question 1 · Updates: Not quite.", text)
         self.assertIn("Correct answer: 2", text)
-        self.answer(qid("unit-2", 2), "3")
+        self.answer(qid("unit-2", 2), "2")
         self.answer(qid("unit-2", 3), "2")
         text = self.text()
-        self.assertIn("No review was added: 2 of 3 answers in this check were wrong", text)
+        self.assertIn("No review was added: 1 of 3 answers in this check were wrong", text)
         self.assertNotIn("Plan change", text)
         button(self.panel(), "Continue").click().run()
         self.assertIn("plan: 3 study days · 2 checked · 1 to go", self.text())
 
-        # Day 3: three wrong answers add a review at the end of the plan.
+        # Day 3: two wrong answers out of three add a review at the end of the plan.
         self.app.number_input(key="study_day").set_value(3).run()
         self.model.turns += [
             turn("ask_question", 7, unit_id="unit-3", reason="Check loops."),
@@ -129,8 +129,8 @@ class CheckUITests(unittest.TestCase):
                  summary="Loop counting is not clear yet."),
         ]
         button(self.panel(), "Check my understanding").click().run()
-        for n in (1, 2, 3):
-            self.answer(qid("unit-3", n), "4")
+        for n, option in ((1, "4"), (2, "2"), (3, "4")):
+            self.answer(qid("unit-3", n), option)
         text = self.text()
         self.assertIn("Added a review of Loops as day 4, at the end of the plan", text)
         self.assertIn("Your answers in this check (3)", [e.label for e in self.panel().expander])

@@ -100,12 +100,12 @@ class FocusAndReplanTests(unittest.TestCase):
             asked.append(question_id)
         return asked
 
-    def test_three_wrong_answers_add_a_review_at_the_end(self):
+    def test_mostly_wrong_answers_add_a_review_at_the_end(self):
         days = schedule_units(UNITS, 3)
         same, change = after_daily_check(self.state, diagnosis(), days, 2)
         self.assertEqual((same, change), (days, None))
 
-        asked = self.wrong_answers("unit-2", 3)
+        asked = self.wrong_answers("unit-2", 2, right=1)
         updated, change = after_daily_check(
             self.state, diagnosis("unit-2", "confirmed", "review_today", asked), days, 2, asked)
         self.assertEqual(updated[:3], days)
@@ -122,21 +122,24 @@ class FocusAndReplanTests(unittest.TestCase):
         self.assertFalse(note.changed)
         self.assertIn("already planned for day 4, so no day was added", note.message)
 
-    def test_one_or_two_wrong_answers_add_no_review(self):
+    def test_which_checks_add_a_review(self):
         days = schedule_units(UNITS, 3)
-        for wrong, right in ((1, 2), (2, 1), (2, 0)):
+        for wrong, right, added in ((2, 0, True), (2, 1, True), (3, 0, True),
+                                    (1, 0, False), (1, 2, False), (2, 2, False), (0, 3, False)):
             with self.subTest(wrong=wrong, right=right):
+                self.state = LearnerState(UNITS)
                 asked = self.wrong_answers("unit-2", wrong, right)
-                same, note = after_daily_check(
+                updated, change = after_daily_check(
                     self.state, diagnosis("unit-2", "confirmed", "review_today"), days, 2, asked)
-                self.assertEqual(same, days)
-                self.assertFalse(note.changed)
-                self.assertIn(f"{wrong} of {wrong + right} answers in this check were wrong", note.message)
-                self.assertIn("only after 3 wrong answers", note.message)
+                self.assertEqual(len(updated) == 4, added)
+                self.assertEqual(change.changed, added)
+                if not added:
+                    self.assertIn(f"{wrong} of {wrong + right} answers in this check were wrong", change.message)
+                    self.assertIn("at least 2 answers are wrong and they outnumber the right ones", change.message)
 
     def test_revisit_names_the_earlier_unit_and_no_gap_reviews_the_weakest_today(self):
         days = schedule_units(UNITS, 3)
-        asked = self.wrong_answers("unit-3", 3)
+        asked = self.wrong_answers("unit-3", 2)
         updated, change = after_daily_check(self.state, diagnosis("unit-1", next_step="revisit_earlier"), days, 3,
                                             asked)
         self.assertEqual(updated[3].assignments[0].unit.unit_id, "unit-1")
