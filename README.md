@@ -61,12 +61,9 @@ The default model is `gpt-4.1-mini`. To choose another model that supports struc
 
 ### Marking weak topics
 
-After the outline appears, check **I find this weak or unclear** under any topic. In the sidebar you can also describe what you don't understand in a sentence. Both are used when you select **Create study plan**:
+After the outline appears, check **I find this weak or unclear** under any topic, then select **Create study plan**. Weak topics get more of the time: in a short plan their units share a day with fewer other units; in a long plan they get extra reading days first and a review day, before other units get extra reading days. Changing the checks takes effect the next time you create the plan.
 
-- Weak topics get more of the time. In a short plan their units share a day with fewer other units; in a long plan they get extra reading days first and a review day, before other units get extra reading days.
-- The tutor matches your sentence to units in the material, and tells you when it describes something the material doesn't cover.
-
-**Learning status** shows each unit's status and the evidence behind it. A unit marked weak is only suspected until answers check it; practice answers decide whether it is understood or a likely gap.
+**Learning status** shows each unit's status and the evidence behind it. A unit marked weak is only suspected until answers check it; practice answers decide whether it is understood or a likely gap. To ask about something specific you don't understand, use **Ask the tutor**.
 
 ### Asking the tutor
 
@@ -85,7 +82,7 @@ The diagnosis agent is not in the web app yet. To try it on a PDF, run it in the
 uv run --no-project --env-file .env -- .venv/bin/python -m tutor.agent.cli path/to/lesson.pdf --trace
 ```
 
-The tutor builds the study units, asks which units are unclear, then asks up to five questions from your material. It chooses each question from your earlier answers and shows why. It reports a confirmed gap only after at least two wrong answers on that unit; otherwise its conclusion stays uncertain. `--trace` lists every model call and tool step with its time and tokens.
+The tutor builds the study units, asks which units you find weak, then asks up to five questions from your material. It chooses each question from your earlier answers and shows why. It reports a confirmed gap only after at least two wrong answers on that unit; otherwise its conclusion stays uncertain. `--trace` lists every model call and tool step with its time and tokens.
 
 ## Planned architecture
 

@@ -13,7 +13,6 @@ from tutor.materials.ingest import PdfInputError, read_pdf_pages
 from tutor.planning import build_study_units, plan_units
 
 from .bank import QuestionBank
-from .intake import read_self_report
 from .loop import Ask, advance, start_session
 from .state import LearnerState
 
@@ -57,20 +56,14 @@ def main(argv: list[str] | None = None) -> int:
     print("\nStudy units:")
     for number, unit in enumerate(units, 1):
         print(f"  {number}. {unit.title} — {unit.objective}")
-    raw = input("\nUnits you don't understand (numbers separated by commas, or Enter for none): ")
-    checked = [units[int(n) - 1].unit_id for n in raw.replace(",", " ").split()
-               if n.isdigit() and 1 <= int(n) <= len(units)]
-    note = input("Describe what you don't understand (optional): ")
+    raw = input("\nUnits you find weak (numbers separated by commas, or Enter for none): ")
+    weak = [units[int(n) - 1].unit_id for n in raw.replace(",", " ").split()
+            if n.isdigit() and 1 <= int(n) <= len(units)]
 
     state = LearnerState(units)
+    state.apply_report(weak)
     session = start_session(units, state, QuestionBank(units, pages))
     try:
-        with tracing(session.trace):
-            intake = read_self_report(units, checked, note)
-        state.apply_report(intake.checked_ids, intake.note, intake.noted_ids, intake.missing_topic)
-        if intake.missing_topic:
-            print(f"\nYour material doesn't seem to cover: {intake.missing_topic}")
-
         step = advance(session)
         while isinstance(step, Ask):
             question = step.question.question

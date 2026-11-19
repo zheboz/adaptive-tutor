@@ -7,9 +7,7 @@ from streamlit.testing.v1 import AppTest
 from tests.test_outline_ui import upload
 from tests.test_pdf_preview import APP, button
 from tests.test_planning_ui import create_plan, visible_text
-from tutor.agent.intake import NoteMapping
 from tutor.assessment.questions import Question
-from tutor.llm import LLMError
 from tutor.materials.outline import Outline, Topic
 from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
 
@@ -29,7 +27,6 @@ class LearnerUITests(unittest.TestCase):
             Solution(tasks=[UnitTask(unit_number=n, objective=t.summary, activity="Explain it.")
                             for n, t in enumerate(topics, 1)]),
         ]
-        self.mapper = self.enterContext(patch("tutor.agent.intake.generate_structured"))
         self.generate = self.enterContext(patch("tutor.assessment.questions.generate_questions"))
         self.app = AppTest.from_file(APP).run()
         upload(self.app, "Assignment: x = 2.", "Iteration: loop twice.", "Counting: range(3).")
@@ -39,11 +36,9 @@ class LearnerUITests(unittest.TestCase):
         html = visible_text(self.app.main.container("learning_status_panel"))
         return re.sub(r"\s*<br>\s*", "\n", re.sub(r"</?(?:p|strong|small)>", "", html))
 
-    def plan(self, days, *weak, note=None):
+    def plan(self, days, *weak):
         for index in weak:
             self.app.checkbox(key=f"weak_topic_{index}").check()
-        if note is not None:
-            self.app.sidebar.text_area(key="self_report_note").set_value(note)
         create_plan(self.app, days)
         self.assertFalse(self.app.exception)
 
@@ -56,37 +51,24 @@ class LearnerUITests(unittest.TestCase):
         self.assertIn("More time for: Iteration", self.plan_text())
         self.assertIn("Iteration · Marked weak · not checked yet", self.status_text())
         self.assertIn("Assignment · Not checked yet", self.status_text())
-        self.mapper.assert_not_called()
+        self.assertFalse(self.app.sidebar.text_area)
         # A long plan gives the weak unit a review day.
         self.plan(6)
         kinds = [(a.unit.title, a.kind) for day in self.app.session_state["study_plan"] for a in day.assignments]
         self.assertIn(("Iteration", "review"), kinds)
         self.assertNotIn(("Assignment", "review"), kinds)
 
-    def test_note_is_matched_once_and_reported_when_not_covered(self):
-        self.mapper.return_value = NoteMapping(unit_ids=["unit-3"], not_in_material=True, missing_topic="while loops")
-        self.plan(3, 0, note="Counting loops, especially while loops")
+    def test_checked_topics_take_effect_when_the_plan_is_created(self):
+        self.plan(3, 0, 2)
         self.assertEqual(self.app.session_state["planned_weak"], ("unit-1", "unit-3"))
-        text = self.status_text()
-        self.assertIn("Loop counts · Marked weak · not checked yet", text)
-        self.assertIn("your note: “Counting loops, especially while loops”", text)
-        self.assertIn("Your note matches: Loop counts", visible_text(self.app.sidebar))
-        self.assertIn("while loops", self.app.sidebar.info[0].value)
-        # Changing only the duration keeps the report and does not ask the model again.
-        self.plan(5)
-        self.assertEqual(self.mapper.call_count, 1)
-        self.assertIn("Loop counts · Marked weak", self.status_text())
-        # Unchecking a topic changes the plan on the next submission.
-        self.app.checkbox(key="weak_topic_0").uncheck()
-        self.plan(5)
+        self.assertIn("Loop counts · Marked weak · not checked yet", self.status_text())
+        # Unchecking alone changes nothing until the plan is created again.
+        self.app.checkbox(key="weak_topic_0").uncheck().run()
+        self.assertEqual(self.app.session_state["planned_weak"], ("unit-1", "unit-3"))
+        self.plan(3)
         self.assertEqual(self.app.session_state["planned_weak"], ("unit-3",))
-
-    def test_a_failed_note_match_still_creates_the_plan(self):
-        self.mapper.side_effect = LLMError("Could not reach OpenAI.")
-        self.plan(2, 1, note="loops")
-        self.assertIn("Could not reach OpenAI.", self.app.sidebar.error[0].value)
-        self.assertEqual(self.app.session_state["planned_weak"], ("unit-2",))
-        self.assertIn("Iteration · Marked weak", self.status_text())
+        self.assertIn("Assignment · Not checked yet", self.status_text())
+        self.assertNotIn("More time for: Assignment", self.plan_text())
 
     def test_practice_answers_update_the_unit_status(self):
         question = Question(

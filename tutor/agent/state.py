@@ -1,9 +1,9 @@
-"""Record what the learner reports and answers for each study unit, and derive a status from that evidence.
+"""Record which units the learner marked weak and how they answered, and derive each unit's status.
 
 Statuses come only from scored answers and the learner's own report, never from the model:
 
 - untested:  no answers and no report
-- suspected: the learner said the unit is unclear, but no answer has checked it
+- suspected: the learner marked the unit weak, but no answer has checked it
 - uncertain: one answer, mixed answers, or correct answers that could be guesses
 - mastered:  no wrong answers and at least two correct multiple-choice answers
 - gap:       at least two wrong answers, outnumbering the correct ones
@@ -34,7 +34,6 @@ class Answer:
 class UnitEvidence:
     unit: StudyUnit
     self_reported: bool = False
-    notes: list[str] = field(default_factory=list)
     answers: list[Answer] = field(default_factory=list)
 
     @property
@@ -58,7 +57,6 @@ class UnitEvidence:
 class LearnerState:
     def __init__(self, units: Sequence[StudyUnit]):
         self.units = {unit.unit_id: UnitEvidence(unit) for unit in units}
-        self.missing_topics: list[str] = []
 
     @property
     def unit_ids(self) -> tuple[str, ...]:
@@ -67,15 +65,11 @@ class LearnerState:
     def matches(self, units: Sequence[StudyUnit]) -> bool:
         return self.unit_ids == tuple(unit.unit_id for unit in units)
 
-    def apply_report(self, unit_ids: Iterable[str], note: str = "", noted_ids: Iterable[str] = (),
-                     missing_topic: str | None = None) -> None:
-        """Replace the previous self-report. A note is attached to the units it was mapped to."""
+    def apply_report(self, unit_ids: Iterable[str]) -> None:
+        """Replace the previous report of weak units."""
         reported = set(unit_ids)
-        noted = set(noted_ids)
         for unit_id, evidence in self.units.items():
-            evidence.self_reported = unit_id in reported or unit_id in noted
-            evidence.notes = [note] if note and unit_id in noted else []
-        self.missing_topics = [missing_topic] if missing_topic else []
+            evidence.self_reported = unit_id in reported
 
     def answered(self, question_id: str) -> bool:
         return any(answer.question_id == question_id for answer in self.answers())
@@ -108,8 +102,7 @@ class LearnerState:
                     "unit_id": unit_id,
                     "title": evidence.unit.title,
                     "status": evidence.status,
-                    "self_reported_unclear": evidence.self_reported,
-                    "learner_note": evidence.notes[0] if evidence.notes else None,
+                    "marked_weak_by_learner": evidence.self_reported,
                     "answers": [
                         {"question_id": a.question_id, "correct": a.correct, "kind": a.kind, "source": a.source}
                         for a in evidence.answers
@@ -117,5 +110,4 @@ class LearnerState:
                 }
                 for unit_id, evidence in self.units.items()
             ],
-            "topics_missing_from_material": self.missing_topics,
         }

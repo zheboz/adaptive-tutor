@@ -17,7 +17,7 @@ def reset_preview() -> None:
         "pdf_pages", "pdf_page_number", "study_outline", "unit_plan", "study_units",
         "study_plan", "study_target_days", "planned_days", "study_day",
         "practice_index", "practice_sets", "practice_answers", "practice_skips",
-        "learner_state", "learner_intake", learner.NOTE_KEY, "planned_weak", "qa_session",
+        "learner_state", "planned_weak", "qa_session",
     ):
         st.session_state.pop(key, None)
     learner.clear_weak_topics()
@@ -34,7 +34,6 @@ def render_plan_controls(result: outline.Outline) -> None:
             help="Choose how many days to spend on the full outline.",
         )
         st.caption("Topics you check as weak in the outline get more of the time.")
-        learner.render_note_input()
         create_plan = st.form_submit_button(
             "Create study plan", help="OpenAI prepares the study tasks once. Changing the duration reuses them."
         )
@@ -56,8 +55,6 @@ def render_plan_controls(result: outline.Outline) -> None:
             st.session_state.planned_days = target_days
             st.session_state.planned_weak = weak
             st.session_state.study_day = 1
-    if "study_units" in st.session_state:
-        learner.render_intake_feedback(st.session_state.study_units)
 
 
 def render_study_plan(pages: list[PdfPage], document_id: str) -> None:

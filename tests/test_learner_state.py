@@ -1,8 +1,5 @@
-import json
 import unittest
-from unittest.mock import patch
 
-from tutor.agent.intake import NoteMapping, read_self_report
 from tutor.agent.state import LearnerState
 from tutor.planning import StudyUnit
 
@@ -58,45 +55,10 @@ class StatusRuleTests(unittest.TestCase):
             self.state.record("q2", "unit-9", "multiple_choice", True, "practice")
 
     def test_a_new_report_replaces_the_old_one(self):
-        self.state.apply_report(["unit-1"], "x = x + 1 confuses me", ["unit-2"], "while loops")
+        self.state.apply_report(["unit-1", "unit-2"])
         summary = self.state.summary()
-        self.assertEqual([u["self_reported_unclear"] for u in summary["units"]], [True, True, False])
-        self.assertEqual(summary["units"][1]["learner_note"], "x = x + 1 confuses me")
-        self.assertIsNone(summary["units"][0]["learner_note"])
-        self.assertEqual(summary["topics_missing_from_material"], ["while loops"])
+        self.assertEqual([u["marked_weak_by_learner"] for u in summary["units"]], [True, True, False])
+        self.state.apply_report(["unit-3", "unit-9"])
+        self.assertEqual([u["marked_weak_by_learner"] for u in self.state.summary()["units"]], [False, False, True])
         self.state.apply_report([])
-        self.assertFalse(any(u["self_reported_unclear"] for u in self.state.summary()["units"]))
-        self.assertEqual(self.state.missing_topics, [])
-
-
-class IntakeTests(unittest.TestCase):
-    def setUp(self):
-        self.model = self.enterContext(patch("tutor.agent.intake.generate_structured"))
-
-    def test_checked_units_alone_need_no_model_call(self):
-        intake = read_self_report(UNITS, ["unit-3", "unit-9", "unit-1"], "   ")
-        self.assertEqual(intake.unit_ids, ("unit-1", "unit-3"))
-        self.assertIsNone(intake.missing_topic)
-        self.model.assert_not_called()
-
-    def test_note_is_matched_to_real_units_only(self):
-        self.model.return_value = NoteMapping(unit_ids=["unit-2", "unit-7"], not_in_material=False, missing_topic=None)
-        intake = read_self_report(UNITS, ["unit-3"], "I don't get  x = x + 1")
-        self.assertEqual((intake.noted_ids, intake.unit_ids), (("unit-2",), ("unit-3", "unit-2")))
-        self.assertEqual(intake.note, "I don't get x = x + 1")
-        self.assertIsNone(intake.missing_topic)
-        payload = json.loads(self.model.call_args.kwargs["content"])
-        self.assertEqual([u["unit_id"] for u in payload["units"]], ["unit-1", "unit-2", "unit-3"])
-        self.assertEqual(payload["learner_note"], "I don't get x = x + 1")
-
-    def test_topics_outside_the_material_are_reported(self):
-        self.model.return_value = NoteMapping(unit_ids=[], not_in_material=True, missing_topic="recursion")
-        intake = read_self_report(UNITS, [], "What is recursion?")
-        self.assertEqual((intake.noted_ids, intake.missing_topic), ((), "recursion"))
-        # Nothing matched and no topic named: the note itself is what is missing.
-        self.model.return_value = NoteMapping(unit_ids=["bogus"], not_in_material=False, missing_topic=None)
-        self.assertEqual(read_self_report(UNITS, [], "decorators").missing_topic, "decorators")
-        # Partly covered: keep the match and the missing part.
-        self.model.return_value = NoteMapping(unit_ids=["unit-3"], not_in_material=True, missing_topic="while loops")
-        intake = read_self_report(UNITS, [], "for and while loops")
-        self.assertEqual((intake.noted_ids, intake.missing_topic), (("unit-3",), "while loops"))
+        self.assertFalse(any(u["marked_weak_by_learner"] for u in self.state.summary()["units"]))
