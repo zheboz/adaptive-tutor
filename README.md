@@ -45,10 +45,10 @@ The app never uses a key from the server's environment: without your key, nothin
 
 ### Page layout
 
-A step bar at the top shows where you are (Upload › Outline › Mark & quiz › Plan › Study) and what to do next. The PDF stays on the left in a panel with its page controls at the bottom. On the right, a panel of the same height, so the two line up, holds a row of views at the top; the selected view scrolls below it:
+A step bar at the top shows where you are (Upload › Outline › Mark & quiz › Plan › Study) and what to do next. The sidebar holds only the OpenAI settings and the upload; every other action is in the panel beside the PDF, where you are already looking. The PDF stays on the left in a panel with its page controls at the bottom. On the right, a panel of the same height, so the two line up, holds a row of views at the top; the selected view scrolls below it:
 
-- Before the plan: **Outline** (check the topics you don't understand), **Initial quiz** and **Progress**.
-- After the plan: **Today** (the open study day and its check), **Plan** (goal, length and checked days, every day in a table, plan changes and the outline) and **Progress** (each unit's status and the initial quiz answers).
+- Before the plan: **Outline** (check the topics you don't understand, then start or skip the quiz at the end), **Initial quiz** (the questions, the answers, then the number of days and **Create study plan**) and **Progress**.
+- After the plan: **Today** (the open study day and its check), **Plan** (goal, length and checked days, every day in a table, plan changes, **Change the number of days** and the outline) and **Progress** (each unit's status and the initial quiz answers).
 
 **Ask the tutor** is always shown right below both panels, across the full width, from the moment a PDF is uploaded: it needs only the PDF, not the outline or the plan. The text read from the current page is in a collapsed **Extracted text** section at the bottom of the page.
 
@@ -56,24 +56,26 @@ Days are picked from a row of buttons: ✓ marks a checked day and ↻ a review 
 
 ### Generating an outline
 
-1. Upload a PDF in the sidebar. Use the up/down arrows or the page selector beneath the PDF to navigate the original document. **Extracted text** below the reading area follows the selected page. The preview works offline.
-2. Click **Generate outline**. Short documents use one model request. Longer documents are processed in batches; topics with matching titles are combined in page order. Blank, image-only, or unreadable pages are skipped.
+1. Upload a PDF in the sidebar. Use the up/down arrows or the page selector beneath the PDF to navigate the original document. **Extracted text** at the bottom of the page follows the selected page. The preview works offline.
+2. The outline is generated as soon as the PDF and your key are in; there is no button to press. If the request fails, the reason and **Try again** appear beside the PDF; other interactions do not repeat it. Short documents use one model request. Longer documents are processed in batches; topics with matching titles are combined in page order. Blank, image-only, or unreadable pages are skipped.
 3. The outline appears to the right of the PDF. Select a page reference under a topic to check its summary against the original page. Switching pages reuses the outline. Removing or replacing the PDF clears it.
 
 ### Scheduling the outline
 
-1. In the sidebar, enter the **Target duration (days)** and select **Create study plan**. The plan appears beside the PDF, and the outline moves below both, above the extracted text. Each panel scrolls independently. The first submission runs a two-step Plan-and-Solve workflow with OpenAI. The planning request uses the full outline to group or split topics into ordered learning units. The second request follows that plan to write a learning objective and a study task for each unit. The app checks topic coverage and takes the page references from the outline.
+1. Below the initial quiz results, enter the **Target duration (days)** and select **Create study plan**. The plan opens in the **Today** view. The study units come from a two-step Plan-and-Solve workflow with OpenAI, which starts in the background as soon as the outline is ready, while you read it and check topics; starting the quiz waits only for whatever is left. The planning request uses the full outline to group or split topics into ordered learning units. The second request follows that plan to write a learning objective and a study task for each unit. The app checks topic coverage and takes the page references from the outline.
 2. Choose a **Study day** to see its learning content and open the cited pages. A short plan groups complete units together. A longer plan can put the reading on one or more days and the unit's study task on the next. Any days left after all readings and tasks are marked for optional review.
-3. To adjust the pace, change the duration and submit again. Python redistributes the same units locally. The plan stays available while browsing the PDF in the current session and clears when the PDF changes.
+3. To adjust the pace, open **Change the number of days** in the **Plan** view and submit again. Python redistributes the same units locally. The plan stays available while browsing the PDF in the current session and clears when the PDF changes.
 
 ### Initial quiz, then the plan
 
 1. After the outline appears, check **I don't understand this** under the topics you find unclear in the **Outline** view.
-2. Select **Start initial quiz** in the sidebar. The study units are prepared, and the quiz takes the outline's place beside the PDF:
+2. Select **Start initial quiz** at the end of the outline. The quiz opens in the **Initial quiz** view:
    - With topics checked, there is one question for each checked topic, in the order you checked them. Each question is built from that topic's own pages.
    - With nothing checked, up to three questions come from topics spread across the whole material.
 3. Answer every question and select **Submit answers**. Only then do you see whether each answer was right, the correct answer, an explanation, and the passage of your material that supports it, with a link that opens that page.
-4. The plan controls appear after the results. Set the number of days and select **Create study plan**. Topics you checked, and topics you answered wrong, get more of the time: in a short plan their units share a day with fewer other units; in a long plan they get extra reading days first and a review day at the end of the plan.
+4. The plan controls appear right below the results. Set the number of days and select **Create study plan**. Topics you checked, and topics you answered wrong, get more of the time: in a short plan their units share a day with fewer other units; in a long plan they get extra reading days first and a review day at the end of the plan.
+
+To go straight to the plan, select **Skip the quiz** instead. Nothing is graded, and the topics you checked still get more time.
 
 **Learning status** shows each unit's status and the evidence behind it. To ask about something specific you don't understand, use **Ask the tutor**.
 

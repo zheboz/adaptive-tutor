@@ -173,7 +173,6 @@ class TutorChatUITests(unittest.TestCase):
         self.assertIn("It runs 3 times.", [m.value for m in self.app.main.container("tutor_chat_panel").markdown])
 
     def test_chat_answers_with_page_links_and_knows_the_plan(self):
-        button(self.app.sidebar, "Generate outline").click().run()
         self.app.checkbox(key="weak_topic_0").check()
         create_plan(self.app, 2)
         model = ScriptedModel(
@@ -203,7 +202,6 @@ class TutorChatUITests(unittest.TestCase):
             self.assertIn("Missing: recursion", "\n".join(c.value for c in panel.caption))
 
     def test_an_outage_is_shown_and_the_question_can_be_asked_again(self):
-        button(self.app.sidebar, "Generate outline").click().run()
         with patch("tutor.agent.qa.call_with_tools", side_effect=LLMError("Could not reach OpenAI.")):
             self.app.chat_input(key="tutor_question").set_value("Explain loops").run()
         self.assertIn("Could not reach OpenAI.", self.app.main.container("tutor_chat_panel").error[0].value)

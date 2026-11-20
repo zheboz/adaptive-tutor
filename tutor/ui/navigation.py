@@ -8,17 +8,23 @@ import streamlit as st
 
 
 VIEW_KEY = "right_view"
+_NEXT_VIEW = "next_view"
 DAY_KEY = "current_day"
 _DAY_PICKER = "day_picker"
-NAVIGATION_KEYS = (VIEW_KEY, DAY_KEY, _DAY_PICKER)
+NAVIGATION_KEYS = (VIEW_KEY, _NEXT_VIEW, DAY_KEY, _DAY_PICKER)
 
 
 def show_view(name: str) -> None:
-    """Switch the view; call before the view bar is drawn in this run, or before a rerun."""
-    st.session_state[VIEW_KEY] = name
+    """Open this view the next time the view bar is drawn; follow with `st.rerun()`.
+
+    The buttons that switch views sit inside a view, below the bar that is already drawn.
+    """
+    st.session_state[_NEXT_VIEW] = name
 
 
 def render_view_bar(options: list[str]) -> str:
+    if st.session_state.get(_NEXT_VIEW) in options:
+        st.session_state[VIEW_KEY] = st.session_state.pop(_NEXT_VIEW)
     if st.session_state.get(VIEW_KEY) not in options:
         st.session_state[VIEW_KEY] = options[0]
     return st.segmented_control("View", options, key=VIEW_KEY, required=True, label_visibility="collapsed")
