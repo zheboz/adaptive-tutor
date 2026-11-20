@@ -1,4 +1,4 @@
-"""Render the original PDF page and its extracted text in separate reading panels."""
+"""Render the original PDF page, and the text read from it in a collapsed section."""
 
 import streamlit as st
 from streamlit.runtime.uploaded_file_manager import UploadedFile
@@ -16,13 +16,13 @@ def show_page(number: int) -> None:
 
 
 def render_pdf_preview(upload: UploadedFile, pages: list[PdfPage]) -> PdfPage:
-    st.header("PDF preview")
+    """The page and its controls in one panel, as tall as the view panel beside it."""
     count = len(pages)
     page = pages[st.session_state.get("pdf_page_number", 1) - 1]
     with st.container(key="pdf_preview_panel", height=READER_PANEL_HEIGHT, border=True, gap="xsmall"):
         pdf_viewer(
             upload.getvalue(), pages_to_render=[page.number], render_text=True,
-            height=420, zoom_level="auto", key=f"original_pdf_{upload.file_id}_{page.number}",
+            height=READER_PANEL_HEIGHT - 100, zoom_level="auto", key=f"original_pdf_{upload.file_id}_{page.number}",
         )
         with st.container(key="pdf_page_controls", horizontal=True, horizontal_alignment="center", gap=4):
             st.button(
@@ -41,12 +41,12 @@ def render_pdf_preview(upload: UploadedFile, pages: list[PdfPage]) -> PdfPage:
 
 
 def render_extracted_text(page: PdfPage) -> None:
-    st.header("Extracted text")
-    with st.container(key="extracted_text_panel", height=240, border=True):
-        st.caption(f"Page {page.number}")
-        if page.error:
-            st.warning(page.error)
-        elif page.text.strip():
-            st.code(page.text, language=None)
-        else:
-            st.info("No selectable text on this page. It may be blank or scanned. Scanned pages need OCR.")
+    """The text read from the page, for checking what the tutor works from; collapsed by default."""
+    with st.expander(f"Extracted text · page {page.number}"):
+        with st.container(key="extracted_text_panel", height=240, border=False):
+            if page.error:
+                st.warning(page.error)
+            elif page.text.strip():
+                st.code(page.text, language=None)
+            else:
+                st.info("No selectable text on this page. It may be blank or scanned. Scanned pages need OCR.")

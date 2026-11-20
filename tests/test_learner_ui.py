@@ -6,8 +6,7 @@ from streamlit.testing.v1 import AppTest
 
 from tests.test_outline_ui import upload
 from tests.test_pdf_preview import APP, button
-from tests.test_planning_ui import create_plan, visible_text
-from tutor.assessment.questions import Question
+from tests.test_planning_ui import create_plan, show_view, visible_text
 from tutor.materials.outline import Outline, Topic
 from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
 
@@ -33,6 +32,7 @@ class LearnerUITests(unittest.TestCase):
         button(self.app.sidebar, "Generate outline").click().run()
 
     def status_text(self):
+        show_view(self.app, "Progress")
         html = visible_text(self.app.main.container("learning_status_panel"))
         return re.sub(r"\s*<br>\s*", "\n", re.sub(r"</?(?:p|strong|small)>", "", html))
 
@@ -43,7 +43,8 @@ class LearnerUITests(unittest.TestCase):
         self.assertFalse(self.app.exception)
 
     def plan_text(self):
-        return visible_text(self.app.main.container("plan_panel"))
+        show_view(self.app, "Plan")
+        return visible_text(self.app.main.container("plan_overview_panel"))
 
     def test_weak_topics_on_the_outline_get_more_time(self):
         self.assertEqual(len(self.app.main.container("outline_panel").checkbox), 3)
@@ -62,6 +63,9 @@ class LearnerUITests(unittest.TestCase):
         self.plan(3, 0, 2)
         self.assertEqual(self.app.session_state["planned_weak"], ("unit-1", "unit-3"))
         self.assertIn("Loop counts · Marked weak · not checked yet", self.status_text())
+        # The outline is in the Plan view now; its checks keep what was checked before.
+        show_view(self.app, "Plan")
+        self.assertTrue(self.app.checkbox(key="weak_topic_0").value)
         # Unchecking alone changes nothing until the plan is created again.
         self.app.checkbox(key="weak_topic_0").uncheck().run()
         self.assertEqual(self.app.session_state["planned_weak"], ("unit-1", "unit-3"))
@@ -69,19 +73,3 @@ class LearnerUITests(unittest.TestCase):
         self.assertEqual(self.app.session_state["planned_weak"], ("unit-3",))
         self.assertIn("Assignment · Not checked yet", self.status_text())
         self.assertNotIn("More time for: Assignment", self.plan_text())
-
-    def test_practice_answers_update_the_unit_status(self):
-        question = Question(
-            kind="multiple_choice", prompt="Which value is assigned?", options=("2", "3"), correct_index=0,
-            explanation="x = 2 stores 2.", origin="generated", source_ids=("p1",), answer_origin="reference",
-        )
-        self.generate.side_effect = [(question,), (), ()]
-        self.plan(1)
-        button(self.app.main.container("plan_panel"), "Generate daily practice").click().run()
-        self.app.radio[0].set_value("3").run()
-        button(self.app, "Check answer").click().run()
-        self.assertIn("Assignment · Needs more evidence", self.status_text())
-        self.assertIn("0 of 1 answers correct", self.status_text())
-        state = self.app.session_state["learner_state"]
-        (answer,) = state.answers()
-        self.assertEqual((answer.unit_id, answer.correct, answer.source), ("unit-1", False, "practice"))

@@ -1,7 +1,9 @@
-"""The tutor's checks in the plan panel: an initial check before studying, and a check after each day.
+"""The daily check in the plan panel: after studying a day, the learner asks to be checked.
 
-Both run the same ReAct agent with a different configuration. Each answer is submitted in the main
-script run so a spinner can show while the tutor chooses the next step.
+Questions are prepared from that day's pages only. When none can be made, the panel says why;
+otherwise the ReAct agent asks up to three of them and the rest of the plan is adjusted. Each answer
+is submitted in the main script run so a spinner can show while the tutor chooses the next step,
+and feedback on it appears before the next question.
 """
 
 from collections.abc import Sequence
@@ -11,17 +13,16 @@ import streamlit as st
 
 from tutor.agent.bank import QuestionBank
 from tutor.agent.loop import Ask, Done, advance, start_session
-from tutor.agent.replan import PlanChange, after_daily_check, after_initial_check
-from tutor.agent.tools import daily_config, initial_config
-from tutor.llm import LLMError, tracing
+from tutor.agent.replan import PlanChange, after_daily_check
+from tutor.agent.tools import daily_config
+from tutor.llm import LLMError, Trace, tracing
 from tutor.materials.ingest import PdfPage
 from tutor.planning import StudyDay, StudyUnit
+from tutor.ui.feedback import render_feedback
 from tutor.ui.learner import learner_state
 
 
-CHECK_KEYS = ("check", "initial_check", "plan_changes", "completed_days", "diagnostic_bank")
-# The first units a check is likely to ask about are prepared in the background.
-PREFETCH_UNITS = 3
+CHECK_KEYS = ("check", "plan_changes", "completed_days", "day_banks")
 
 
 def reset_progress() -> None:
@@ -30,12 +31,14 @@ def reset_progress() -> None:
         st.session_state.pop(key, None)
 
 
-def question_bank(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> QuestionBank:
-    bank = st.session_state.get("diagnostic_bank")
-    if bank is None or bank.unit_ids != tuple(unit.unit_id for unit in units):
-        bank = QuestionBank(units, pages)
-        st.session_state.diagnostic_bank = bank
-    return bank
+def day_bank(units: Sequence[StudyUnit], pages: Sequence[PdfPage], day: StudyDay) -> QuestionBank:
+    """One bank per study day's material, so checking the day again offers questions not yet asked."""
+    key = tuple((a.unit.unit_id, a.kind, a.source_ids, a.round) for a in day.assignments)
+    banks = st.session_state.setdefault("day_banks", {})
+    if key not in banks or banks[key].unit_ids != tuple(unit.unit_id for unit in units):
+        prefix = "-".join(f"{a.kind}{a.round}-{'.'.join(a.source_ids)}" for a in day.assignments)
+        banks[key] = QuestionBank(units, pages, day.assignments, prefix=f"{prefix}:")
+    return banks[key]
 
 
 def completed_days() -> set[int]:
@@ -46,38 +49,62 @@ def plan_changes() -> list[PlanChange]:
     return st.session_state.setdefault("plan_changes", [])
 
 
-def _start(mode: str, units: Sequence[StudyUnit], pages: Sequence[PdfPage], first: Sequence[str],
-           day: int | None = None, today: Sequence[str] = ()) -> None:
+def start_daily_check(day: int) -> None:
+    """Questions are prepared when the panel next renders, where a spinner can show."""
+    st.session_state.check = {"day": day, "session": None, "step": None, "error": None,
+                              "applied": False, "change": None, "answered": [], "empty": None}
+
+
+def _prepare(check: dict[str, Any], units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> None:
+    """Build today's questions; start the agent only on units that have some."""
+    days = st.session_state.study_plan
+    day = days[check["day"] - 1]
+    today = list(dict.fromkeys(assignment.unit.unit_id for assignment in day.assignments))
+    bank = day_bank(units, pages, day)
     state = learner_state(units)
-    config = initial_config(units) if mode == "initial" else daily_config(units, today, day)
-    bank = question_bank(units, pages)
-    session = start_session(units, state, bank, config)
-    with tracing(session.trace):
-        bank.prefetch(list(first)[:PREFETCH_UNITS])
-    st.session_state.check = {"mode": mode, "day": day, "session": session, "step": None,
-                              "error": None, "applied": False, "change": None}
+    used = {answer.question_id for answer in state.answers()}
+    trace = Trace()
+    try:
+        with st.spinner("Preparing questions from today's material…"), tracing(trace):
+            bank.prepare(today)
+    except LLMError as error:
+        check["error"] = str(error)
+        return
+    askable = [unit_id for unit_id in today if bank.remaining(unit_id, used)]
+    if not askable:
+        titles = {unit.unit_id: unit.title for unit in units}
 
+        def reason(unit_id: str) -> str:
+            if bank.remaining(unit_id, ()):
+                return "Every question from today's pages has been asked already."
+            if unit_id in bank.retryable:
+                return f"No question passed verification this time ({bank.problems[unit_id]})"
+            return bank.problems.get(unit_id) or "The pages have no point the tutor could ask about."
 
-def start_initial_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> None:
-    state = learner_state(units)
-    first = state.focus_units() or tuple(unit.unit_id for unit in units)
-    _start("initial", units, pages, first)
-    st.session_state.initial_check = "running"
-
-
-def skip_initial_check() -> None:
-    st.session_state.initial_check = "skipped"
-
-
-def start_daily_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage], days: Sequence[StudyDay], day: int) -> None:
-    today = [assignment.unit.unit_id for assignment in days[day - 1].assignments]
-    _start("daily", units, pages, today, day, today)
+        check["empty"] = [(titles[unit_id], reason(unit_id)) for unit_id in today]
+        check["retry"] = [unit_id for unit_id in today if unit_id in bank.retryable]
+        return
+    session = start_session(units, state, bank, daily_config(units, today, check["day"], askable))
+    session.trace.spans.extend(trace.spans)
+    check["session"] = session
 
 
 def end_check() -> None:
-    check = st.session_state.pop("check", None)
-    if check and check["mode"] == "initial" and st.session_state.get("initial_check") == "running":
-        st.session_state.initial_check = "skipped"
+    st.session_state.pop("check", None)
+
+
+def _finish_without_questions(day: int) -> None:
+    """Nothing could be asked: the day still counts as checked."""
+    completed_days().add(day)
+    end_check()
+
+
+def _retry_preparing(units: Sequence[StudyUnit], pages: Sequence[PdfPage], unit_ids: list[str]) -> None:
+    check = st.session_state.check
+    days = st.session_state.study_plan
+    day_bank(units, pages, days[check["day"] - 1]).forget(unit_ids)
+    check["empty"] = None
+    check["retry"] = []
 
 
 def _advance(check: dict[str, Any], answer: int | None) -> None:
@@ -92,54 +119,26 @@ def _apply(check: dict[str, Any]) -> None:
     """Change the plan once, when the check concludes."""
     if check["applied"]:
         return
-    state = check["session"].state
-    diagnosis = check["step"].diagnosis
-    if check["mode"] == "initial":
-        weak, days, change = after_initial_check(
-            state, diagnosis, st.session_state.get("planned_weak", ()), st.session_state.planned_days,
-        )
-        st.session_state.planned_weak = weak
-        st.session_state.study_plan = days
-        st.session_state.initial_check = "done"
-    else:
-        day = check["day"]
-        before = st.session_state.study_plan
-        days, change = after_daily_check(state, diagnosis, before, day)
-        st.session_state.study_plan = days
-        done = completed_days()
-        if len(days) > len(before):
-            # Days after the inserted review move back by one.
-            shifted = {number + 1 if number > day else number for number in done}
-            done.clear()
-            done.update(shifted)
-        done.add(day)
-    if change is not None:
+    day = check["day"]
+    session = check["session"]
+    days, change = after_daily_check(session.state, check["step"].diagnosis, st.session_state.study_plan, day,
+                                     session.asked)
+    # A review is added at the end, so no day moves.
+    st.session_state.study_plan = days
+    completed_days().add(day)
+    if change is not None and change.changed:
         plan_changes().append(change)
     check["change"] = change
     check["applied"] = True
 
 
-def render_initial_offer(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> None:
-    if st.session_state.get("initial_check") or st.session_state.get("check"):
-        return
-    with st.container(border=True, key="initial_check_offer"):
-        st.markdown("**Initial check**")
-        st.caption("Before you start, answer up to 5 questions so the tutor can confirm which topics "
-                   "need more time. The plan is adjusted to your answers.")
-        with st.container(horizontal=True):
-            st.button("Start initial check", key="start_initial_check", type="primary",
-                      on_click=start_initial_check, args=(units, pages))
-            st.button("Skip", key="skip_initial_check", on_click=skip_initial_check)
-
-
-def render_daily_check_button(units: Sequence[StudyUnit], pages: Sequence[PdfPage],
-                              days: Sequence[StudyDay], day: int) -> None:
+def render_daily_check_button(day: int) -> None:
     st.divider()
     checked = day in completed_days()
     st.button("Check my understanding" if not checked else "Check again", key=f"daily_check_{day}",
-              on_click=start_daily_check, args=(units, pages, days, day))
-    st.caption("The tutor looks at today's practice answers and may ask up to 3 more questions, "
-               "then adjusts the rest of the plan.")
+              on_click=start_daily_check, args=(day,))
+    st.caption("When you have studied today's material, the tutor asks up to 3 questions from today's "
+               "pages, shows the answers with their sources, and adjusts the rest of the plan.")
 
 
 def _evidence_line(check: dict[str, Any]) -> str:
@@ -153,16 +152,34 @@ def _evidence_line(check: dict[str, Any]) -> str:
     return "; ".join(parts)
 
 
-def render_check(units: Sequence[StudyUnit]) -> bool:
+def render_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> bool:
     """Show the active check. Returns True while a check occupies the plan panel."""
     check = st.session_state.get("check")
     if not check:
         return False
-    session = check["session"]
     titles = {unit.unit_id: unit.title for unit in units}
-    st.subheader("Initial check" if check["mode"] == "initial" else f"Day {check['day']} check")
+    st.subheader(f"Day {check['day']} check")
 
-    if check["step"] is None and not check["error"]:
+    if check["session"] is None and check["empty"] is None and not check["error"]:
+        _prepare(check, units, pages)
+    if check["empty"] is not None:
+        retry = check.get("retry") or []
+        if retry:
+            st.warning("No question could be prepared from today's material this time. You can try again, "
+                       "or continue: the day is marked as checked and the plan is unchanged.")
+        else:
+            st.info("There is nothing to check from today's material. When you continue, the day is marked "
+                    "as checked and the plan is unchanged.")
+        for title, reason in check["empty"]:
+            st.caption(f"{title}: {reason}")
+        with st.container(horizontal=True):
+            st.button("Continue", key="check_close", type="primary", on_click=_finish_without_questions,
+                      args=(check["day"],))
+            if retry:
+                st.button("Try again", key="check_prepare_again", on_click=_retry_preparing,
+                          args=(units, pages, retry))
+        return True
+    if check["session"] is not None and check["step"] is None and not check["error"]:
         _advance(check, None)
     if check["error"]:
         st.error(check["error"])
@@ -173,9 +190,17 @@ def render_check(units: Sequence[StudyUnit]) -> bool:
                 st.rerun()
             st.button("Stop check", key="check_stop", on_click=end_check)
         return True
+    session = check["session"]
 
     step = check["step"]
+    answered = check["answered"]
     if isinstance(step, Ask):
+        if answered:
+            # Feedback on the previous answer, before the next question.
+            item, choice = answered[-1]
+            with st.container(border=True, key=f"check_last_feedback_{item.id}"):
+                render_feedback(len(answered), titles[item.unit_id], item.question, choice,
+                                f"check_feedback_{item.id}")
         question = step.question.question
         st.caption(f"Question {step.number} of up to {session.config.max_questions} · "
                    f"{titles[step.question.unit_id]}")
@@ -186,6 +211,7 @@ def render_check(units: Sequence[StudyUnit]) -> bool:
                               key=f"check_choice_{step.question.id}", label_visibility="collapsed")
             submitted = st.form_submit_button("Submit answer")
         if submitted and choice is not None:
+            answered.append((step.question, question.options.index(choice)))
             _advance(check, question.options.index(choice))
             st.rerun()
         st.button("Stop check", key="check_stop", on_click=end_check)
@@ -205,10 +231,17 @@ def render_check(units: Sequence[StudyUnit]) -> bool:
     evidence = _evidence_line(check)
     if evidence:
         st.caption(f"Based on: {evidence}")
-    if check["change"] is not None:
-        st.info(f"Plan change · {check['change'].message}")
-    elif check["mode"] == "daily":
+    change = check["change"]
+    if change is not None and change.changed:
+        st.info(f"Plan change · {change.message}")
+    elif change is not None:
+        st.caption(change.message)
+    else:
         st.caption("The plan is unchanged.")
+    if answered:
+        with st.expander(f"Your answers in this check ({len(answered)})", expanded=True):
+            for number, (item, choice) in enumerate(answered, start=1):
+                render_feedback(number, titles[item.unit_id], item.question, choice, f"check_feedback_{item.id}")
     trace = session.trace
     st.caption(f"This check: {trace.model_calls} model calls · {trace.total_tokens} tokens")
     st.button("Continue", key="check_close", type="primary", on_click=end_check)

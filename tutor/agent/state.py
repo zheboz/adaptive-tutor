@@ -17,7 +17,7 @@ from tutor.planning import StudyUnit
 
 
 Status = Literal["untested", "suspected", "uncertain", "mastered", "gap"]
-AnswerSource = Literal["diagnosis", "practice"]
+AnswerSource = Literal["quiz", "diagnosis"]
 
 
 @dataclass(frozen=True)

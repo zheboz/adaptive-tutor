@@ -6,22 +6,36 @@ from streamlit.testing.v1 import AppTest
 from tests.test_agent_loop import ScriptedModel, turn
 from tests.test_outline_ui import upload
 from tests.test_pdf_preview import APP, button
-from tests.test_planning_ui import create_plan, visible_text
-from tutor.assessment.questions import Question
+from tests.test_planning_ui import create_plan, metrics, open_day, show_view, visible_text
+from tutor.assessment.questions import InsufficientEvidence, PracticeError, Question
 from tutor.llm import LLMError
 from tutor.materials.outline import Outline, Topic
 from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
 
 
-def mc(prompt):
-    return Question("multiple_choice", prompt, ("2", "3", "4"), 0, "From the reading.", "generated",
-                    ("p1",), "reference")
+PAGES = {"Assignment": "p1", "Updates": "p2", "Loops": "p3"}
+
+
+def mc(title, letter):
+    page = PAGES[title]
+    return Question("multiple_choice", f"{title} {letter}?", ("2", "3", "4"), 0, f"{title} works this way.",
+                    "generated", (page,), "reference", evidence=f"The {title.lower()} rule from the notes.",
+                    evidence_source_id=page)
+
+
+def three_questions(assignment, *args, **kwargs):
+    return mc(assignment.unit.title, "A"), mc(assignment.unit.title, "B"), mc(assignment.unit.title, "C")
+
+
+def qid(unit_id, n):
+    """Daily check question IDs carry the day's material: kind, review round and pages."""
+    page = {"unit-1": "p1", "unit-2": "p2", "unit-3": "p3"}[unit_id]
+    return f"study0-{page}:{unit_id}:q{n}"
 
 
 class CheckUITests(unittest.TestCase):
     def setUp(self):
-        topics = [Topic(title=t, summary=f"Learn {t.lower()}.", source_ids=[f"p{n}"])
-                  for n, t in enumerate(("Assignment", "Updates", "Loops"), 1)]
+        topics = [Topic(title=t, summary=f"Learn {t.lower()}.", source_ids=[page]) for t, page in PAGES.items()]
         self.enterContext(patch("tutor.materials.outline.generate_outline")).return_value = Outline(topics=topics)
         planner = self.enterContext(patch("tutor.planning.units.generate_structured"))
         planner.side_effect = [
@@ -29,16 +43,13 @@ class CheckUITests(unittest.TestCase):
             Solution(tasks=[UnitTask(unit_number=n, objective=t.summary, activity="Explain.")
                             for n, t in enumerate(topics, 1)]),
         ]
-        # Practice and diagnostic questions both come from the question pipeline.
-        self.enterContext(patch("tutor.assessment.questions.generate_questions",
-                                side_effect=lambda assignment, *a, **k: (
-                                    mc(f"{assignment.unit.title} A?"), mc(f"{assignment.unit.title} B?"))))
+        self.generate = self.enterContext(
+            patch("tutor.assessment.questions.generate_questions", side_effect=three_questions))
         self.model = ScriptedModel()
         self.enterContext(patch("tutor.agent.loop.call_with_tools", side_effect=self.model))
         self.app = AppTest.from_file(APP, default_timeout=10).run()
         upload(self.app, "Assignment: x = 2.", "Updates: x = x + 1.", "Loops: range(3).")
         button(self.app.sidebar, "Generate outline").click().run()
-        self.app.checkbox(key="weak_topic_2").check()
         create_plan(self.app, 3)
 
     def panel(self):
@@ -46,7 +57,8 @@ class CheckUITests(unittest.TestCase):
 
     def text(self):
         panel = self.panel()
-        extra = [item.value for group in (panel.markdown, panel.info, panel.warning, panel.error) for item in group]
+        extra = [item.value for group in (panel.markdown, panel.info, panel.warning, panel.error, panel.success)
+                 for item in group]
         return "\n".join([visible_text(panel), *extra])
 
     def answer(self, question_id, option):
@@ -54,83 +66,124 @@ class CheckUITests(unittest.TestCase):
         button(self.panel(), "Submit answer").click().run()
         self.assertFalse(self.app.exception)
 
-    def test_initial_check_confirms_a_gap_and_replans(self):
-        self.assertIn("Initial check", self.text())
-        self.assertEqual(self.app.session_state["planned_weak"], ("unit-3",))
+    def test_the_day_shows_no_practice_only_a_check(self):
+        labels = [b.label for b in self.panel().button]
+        self.assertNotIn("Generate daily practice", labels)
+        self.assertIn("Check my understanding", labels)
+        self.assertIn("asks up to 3 questions from today's pages", self.text())
+        self.generate.assert_not_called()
+
+    def test_daily_checks_ask_from_the_days_pages_and_adjust_the_plan(self):
+        show_view(self.app, "Plan")
+        self.assertEqual(metrics(self.app), {"Goal": "3 days", "Plan": "3 days", "Checked": "0", "To go": "3"})
+        show_view(self.app, "Today")
+
+        # Day 1: one right answer; the check continues without a change.
         self.model.turns += [
-            turn("get_learner_state", 1),
-            turn("ask_question", 2, unit_id="unit-3", reason="You marked loops."),
-            turn("ask_question", 3, unit_id="unit-2", reason="Loops build on updates."),
-            turn("ask_question", 4, unit_id="unit-2", reason="Confirm updates."),
-            turn("finish", 5, primary_gap="unit-2", status="confirmed", evidence=["unit-2:q1", "unit-2:q2"],
-                 next_step="review_gap", summary="Updates are the difficulty, not loops."),
+            turn("ask_question", 1, unit_id="unit-1", reason="Check today's unit."),
+            turn("finish", 2, primary_gap="none", status="uncertain", evidence=[qid("unit-1", 1)],
+                 next_step="continue", summary="Assignment looks fine so far."),
         ]
-        button(self.panel(), "Start initial check").click().run()
-        self.assertIn("Why this question: You marked loops.", self.text())
-        self.assertIn("Question 1 of up to 5 · Loops", self.text())
-        self.assertNotIn("Study day", [w.label for w in self.panel().number_input])
-        self.answer("unit-3:q1", "2")      # right
-        self.assertIn("Loops build on updates.", self.text())
-        self.answer("unit-2:q1", "3")      # wrong
-        self.answer("unit-2:q2", "4")      # wrong
-
-        text = self.text()
-        self.assertIn("Likely gap: Updates.", text)
-        self.assertIn("Updates are the difficulty, not loops.", text)
-        self.assertIn("Based on: Updates: wrong; Updates: wrong", text)
-        self.assertIn("More time for Updates (0 of 2 answers correct).", text)
-        self.assertEqual(self.app.session_state["planned_weak"], ("unit-2", "unit-3"))
-        self.assertEqual(self.app.session_state["initial_check"], "done")
-        button(self.panel(), "Continue").click().run()
-        text = self.text()
-        self.assertNotIn("Start initial check", [b.label for b in self.panel().button])
-        self.assertIn("More time for: Updates; Loops", text)
-        self.assertEqual(self.app.number_input(key="study_day").value, 1)
-        status = visible_text(self.app.main.container("learning_status_panel"))
-        self.assertIn("Likely gap", status)
-
-    def test_skipping_and_daily_checks_adjust_the_rest_of_the_plan(self):
-        button(self.panel(), "Skip").click().run()
-        self.assertNotIn("Start initial check", [b.label for b in self.panel().button])
-        self.assertIn("Goal: 3 days · plan: 3 study days · 0 checked · 3 to go", self.text())
-
-        # Day 1: practice is fine, the check continues without a change.
-        self.model.turns += [turn("finish", 1, primary_gap="none", status="uncertain", evidence=[],
-                                  next_step="continue", summary="Assignment looks fine so far.")]
         button(self.panel(), "Check my understanding").click().run()
-        self.assertIn("The plan is unchanged.", self.text())
+        assignment = self.generate.call_args.args[0]
+        self.assertEqual((assignment.unit.unit_id, assignment.source_ids), ("unit-1", ("p1",)))
+        self.assertIn('"units_you_can_ask_about": ["unit-1"]', self.model.seen[0][0]["content"])
+        self.answer(qid("unit-1", 1), "2")
+        text = self.text()
+        self.assertIn("Question 1 · Assignment: Correct.", text)
+        self.assertIn("In your material, page 1: “The assignment rule from the notes.”", text)
+        self.assertIn("The plan is unchanged.", text)
         button(self.panel(), "Continue").click().run()
         self.assertIn("Day 1 · checked", [s.value for s in self.panel().subheader])
-        self.assertIn("1 checked · 2 to go", self.text())
+        self.assertIn("1 of 3 days checked", self.text())
+        self.assertEqual(self.app.segmented_control(key="day_picker").options, ["1 ✓", "2", "3"])
 
-        # Day 2: two wrong answers lead to a review day after it.
-        self.app.number_input(key="study_day").set_value(2).run()
+        # Day 2: one wrong answer and two right ones add no review.
+        open_day(self.app, 2)
         self.model.turns += [
-            turn("ask_question", 2, unit_id="unit-2", reason="Check updates."),
-            turn("ask_question", 3, unit_id="unit-2", reason="Once more."),
-            turn("finish", 4, primary_gap="unit-2", status="confirmed", evidence=["unit-2:q1", "unit-2:q2"],
-                 next_step="review_today", summary="x = x + 1 is not clear yet."),
+            turn("ask_question", 3, unit_id="unit-2", reason="Check updates."),
+            turn("ask_question", 4, unit_id="unit-2", reason="Once more."),
+            turn("ask_question", 5, unit_id="unit-2", reason="A third time."),
+            turn("finish", 6, primary_gap="unit-2", status="uncertain",
+                 evidence=[qid("unit-2", 1)], next_step="review_today",
+                 summary="One slip on x = x + 1."),
         ]
         button(self.panel(), "Check my understanding").click().run()
-        self.answer("unit-2:q1", "3")
-        self.answer("unit-2:q2", "3")
-        self.assertIn("Added a review of Updates as day 3", self.text())
-        button(self.panel(), "Continue").click().run()
+        self.answer(qid("unit-2", 1), "3")
         text = self.text()
-        self.assertIn("plan: 4 study days · 2 checked · 2 to go", text)
-        self.assertIn("The plan now needs 4 days, 1 more than your goal", text)
-        self.assertIn("Plan changes (1)", [e.label for e in self.panel().expander])
-        self.app.number_input(key="study_day").set_value(3).run()
-        self.assertIn("Review · Updates", text + visible_text(self.panel()))
-        self.assertEqual(self.app.number_input(key="study_day").max, 4)
+        self.assertIn("Question 1 · Updates: Not quite.", text)
+        self.assertIn("Correct answer: 2", text)
+        self.answer(qid("unit-2", 2), "2")
+        self.answer(qid("unit-2", 3), "2")
+        text = self.text()
+        self.assertIn("No review was added: 1 of 3 answers in this check were wrong", text)
+        self.assertNotIn("Plan change", text)
+        button(self.panel(), "Continue").click().run()
+        self.assertIn("2 of 3 days checked", self.text())
+
+        # Day 3: two wrong answers out of three add a review at the end of the plan.
+        open_day(self.app, 3)
+        self.model.turns += [
+            turn("ask_question", 7, unit_id="unit-3", reason="Check loops."),
+            turn("ask_question", 8, unit_id="unit-3", reason="Again."),
+            turn("ask_question", 9, unit_id="unit-3", reason="Last one."),
+            turn("finish", 10, primary_gap="unit-3", status="confirmed",
+                 evidence=[qid("unit-3", 1), qid("unit-3", 2)], next_step="review_today",
+                 summary="Loop counting is not clear yet."),
+        ]
+        button(self.panel(), "Check my understanding").click().run()
+        for n, option in ((1, "4"), (2, "2"), (3, "4")):
+            self.answer(qid("unit-3", n), option)
+        text = self.text()
+        self.assertIn("Added a review of Loops as day 4, at the end of the plan", text)
+        self.assertIn("Your answers in this check (3)", [e.label for e in self.panel().expander])
+        button(self.panel(), "Continue").click().run()
+        self.assertIn("3 of 4 days checked", self.text())
+        show_view(self.app, "Plan")
+        overview = self.app.main.container("plan_overview_panel")
+        self.assertEqual(metrics(self.app)["Plan"], "4 days")
+        self.assertIn("The plan now needs 4 days, 1 more than your goal", overview.warning[0].value)
+        self.assertIn("Plan changes (1)", [e.label for e in overview.expander])
+        rows = self.app.dataframe[0].value.to_dict("records")
+        self.assertEqual(rows[3]["Study"], "Review: Loops")
+        self.assertEqual([r["Status"] for r in rows], ["✓ checked"] * 3 + [""])
+        open_day(self.app, 4)
+        self.assertIn("Review · Loops", visible_text(self.panel()))
+        self.assertEqual(self.app.segmented_control(key="day_picker").options, ["1 ✓", "2 ✓", "3 ✓", "4 ↻"])
+
+    def test_a_day_with_nothing_to_ask_says_why(self):
+        self.generate.side_effect = InsufficientEvidence("The assigned pages have no teaching point to assess.")
+        button(self.panel(), "Check my understanding").click().run()
+        text = self.text()
+        self.assertIn("There is nothing to check from today's material. When you continue, the day is "
+                      "marked as checked", text)
+        self.assertIn("Assignment: The assigned pages have no teaching point to assess.", text)
+        self.assertNotIn("Try again", [b.label for b in self.panel().button])
+        self.assertEqual(self.model.seen, [])
+        button(self.panel(), "Continue").click().run()
+        self.assertIn("Day 1 · checked", [s.value for s in self.panel().subheader])
+        self.assertIn("1 of 3 days checked", self.text())
+
+    def test_questions_that_fail_verification_can_be_prepared_again(self):
+        self.generate.side_effect = PracticeError("A question referenced a learning point that is not in the "
+                                                  "assigned reading.")
+        button(self.panel(), "Check my understanding").click().run()
+        text = self.text()
+        self.assertIn("No question could be prepared from today's material this time.", text)
+        self.assertIn("No question passed verification this time", text)
+        self.generate.side_effect = three_questions
+        self.model.turns += [turn("ask_question", 1, unit_id="unit-1", reason="Now there are questions.")]
+        button(self.panel(), "Try again").click().run()
+        self.assertIn("Why this question: Now there are questions.", self.text())
 
     def test_an_outage_can_be_retried_or_the_check_stopped(self):
-        self.model.turns += [LLMError("Could not reach OpenAI."),
-                             turn("ask_question", 1, unit_id="unit-1", reason="Start.")]
-        button(self.panel(), "Start initial check").click().run()
+        self.generate.side_effect = LLMError("Could not reach OpenAI.")
+        button(self.panel(), "Check my understanding").click().run()
         self.assertIn("Could not reach OpenAI.", self.text())
+        self.generate.side_effect = three_questions
+        self.model.turns += [turn("ask_question", 1, unit_id="unit-1", reason="Start.")]
         button(self.panel(), "Try again").click().run()
         self.assertIn("Why this question: Start.", self.text())
         button(self.panel(), "Stop check").click().run()
-        self.assertEqual(self.app.session_state["initial_check"], "skipped")
-        self.assertIn("Goal: 3 days", self.text())
+        self.assertNotIn("check", self.app.session_state)
+        self.assertIn("Day 1", [s.value for s in self.panel().subheader])

@@ -47,12 +47,12 @@ class StatusRuleTests(unittest.TestCase):
         self.assertEqual(self.state.status("unit-1"), "uncertain")
 
     def test_record_is_idempotent_and_rejects_unknown_units(self):
-        first = self.state.record("q1", "unit-1", "multiple_choice", True, "practice")
-        again = self.state.record("q1", "unit-1", "multiple_choice", False, "practice")
+        first = self.state.record("q1", "unit-1", "multiple_choice", True, "quiz")
+        again = self.state.record("q1", "unit-1", "multiple_choice", False, "quiz")
         self.assertIs(first, again)
         self.assertEqual(len(self.state.answers()), 1)
         with self.assertRaises(ValueError):
-            self.state.record("q2", "unit-9", "multiple_choice", True, "practice")
+            self.state.record("q2", "unit-9", "multiple_choice", True, "quiz")
 
     def test_a_new_report_replaces_the_old_one(self):
         self.state.apply_report(["unit-1", "unit-2"])

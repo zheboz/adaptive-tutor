@@ -6,7 +6,10 @@ from unittest.mock import Mock, patch
 from openai import APIConnectionError, AuthenticationError, RateLimitError
 from pydantic import BaseModel
 
-from tutor.llm import DEFAULT_MODEL, LLMError, ToolCall, Trace, call_with_tools, generate_structured, tracing
+from tutor.llm import (
+    DEFAULT_MODEL, LLMError, ToolCall, Trace, call_with_tools, current_model, generate_structured, list_models,
+    tracing, using,
+)
 
 
 class ExampleOutput(BaseModel):
@@ -15,7 +18,8 @@ class ExampleOutput(BaseModel):
 
 class StructuredCallTests(unittest.TestCase):
     def setUp(self):
-        self.enterContext(patch.dict(os.environ, {"OPENAI_API_KEY": "test-only"}, clear=True))
+        self.enterContext(patch.dict(os.environ, {}, clear=True))
+        self.enterContext(using("test-only"))
         self.sdk = self.enterContext(patch("tutor.llm.OpenAI"))
         self.parse = self.sdk.return_value.__enter__.return_value.responses.parse
 
@@ -32,13 +36,13 @@ class StructuredCallTests(unittest.TestCase):
             model=DEFAULT_MODEL, instructions="Make a title.", input="A lesson.",
             text_format=ExampleOutput, store=False,
         )
-        os.environ["OPENAI_MODEL"] = "user-selected-model"
-        self.request()
+        self.assertEqual(self.sdk.call_args.kwargs["api_key"], "test-only")
+        with using("test-only", "user-selected-model"):
+            self.request()
         self.assertEqual(self.parse.call_args.kwargs["model"], "user-selected-model")
 
     def test_missing_key(self):
-        del os.environ["OPENAI_API_KEY"]
-        with self.assertRaisesRegex(LLMError, "OPENAI_API_KEY"):
+        with using(None), self.assertRaisesRegex(LLMError, "sidebar"):
             self.request()
         self.sdk.assert_not_called()
 
@@ -86,7 +90,8 @@ def function_call(call_id, name, arguments):
 
 class ToolCallTests(unittest.TestCase):
     def setUp(self):
-        self.enterContext(patch.dict(os.environ, {"OPENAI_API_KEY": "test-only"}, clear=True))
+        self.enterContext(patch.dict(os.environ, {}, clear=True))
+        self.enterContext(using("test-only"))
         self.sdk = self.enterContext(patch("tutor.llm.OpenAI"))
         self.create = self.sdk.return_value.__enter__.return_value.responses.create
         self.tools = [{"type": "function", "name": "finish", "parameters": {}}]
@@ -129,7 +134,60 @@ class ToolCallTests(unittest.TestCase):
                     self.call()
 
     def test_missing_key_stops_before_a_request(self):
-        del os.environ["OPENAI_API_KEY"]
-        with self.assertRaisesRegex(LLMError, "OPENAI_API_KEY"):
+        with using(None), self.assertRaisesRegex(LLMError, "sidebar"):
             self.call()
         self.sdk.assert_not_called()
+
+
+class CredentialTests(unittest.TestCase):
+    def setUp(self):
+        # A server key in the environment must never be used: only the learner's key is.
+        self.enterContext(patch.dict(os.environ, {"OPENAI_API_KEY": "server-key", "OPENAI_MODEL": "server-model"},
+                                     clear=True))
+        self.sdk = self.enterContext(patch("tutor.llm.OpenAI"))
+        self.parse = self.sdk.return_value.__enter__.return_value.responses.parse
+        self.parse.return_value = SimpleNamespace(status="completed", output_parsed=ExampleOutput(title="T"))
+
+    def request(self):
+        return generate_structured(instructions="Make a title.", content="A lesson.", schema=ExampleOutput)
+
+    def test_only_the_learners_key_and_model_are_used(self):
+        with using("learner-key", "gpt-5.6-luna"):
+            self.request()
+            self.assertEqual(current_model(), "gpt-5.6-luna")
+        self.assertEqual(self.sdk.call_args.kwargs["api_key"], "learner-key")
+        self.assertEqual(self.parse.call_args.kwargs["model"], "gpt-5.6-luna")
+        # Without a model the default is gpt-4.1-mini, whatever the environment says.
+        with using("learner-key"):
+            self.request()
+        self.assertEqual(self.parse.call_args.kwargs["model"], "gpt-4.1-mini")
+        self.assertNotIn("learner-key", os.environ.values())
+
+    def test_without_the_learners_key_nothing_is_sent(self):
+        for block in (using(None), using("", "gpt-6-luna")):
+            with self.subTest(block=block), block, self.assertRaisesRegex(LLMError, "sidebar"):
+                self.request()
+        with self.assertRaisesRegex(LLMError, "sidebar"):
+            self.request()
+        self.sdk.assert_not_called()
+
+    def test_background_threads_that_copy_the_context_use_the_session_key(self):
+        import contextvars
+        from concurrent.futures import ThreadPoolExecutor
+        with using("learner-key", "gpt-6-luna"):
+            context = contextvars.copy_context()
+        with ThreadPoolExecutor(1) as pool:
+            self.assertEqual(pool.submit(context.run, current_model).result(), "gpt-6-luna")
+            self.assertEqual(pool.submit(current_model).result(), "gpt-4.1-mini")
+
+    def test_model_list_keeps_chat_models_without_snapshots(self):
+        models = self.sdk.return_value.__enter__.return_value.models.list
+        models.return_value = [SimpleNamespace(id=i) for i in (
+            "gpt-4.1-mini", "gpt-6-luna", "text-embedding-3-small", "gpt-4o-2024-08-06", "tts-1", "o3",
+            "gpt-image-1", "gpt-5.6-luna", "gpt-live-1",
+        )]
+        self.assertEqual(list_models("learner-key"), ["gpt-4.1-mini", "gpt-5.6-luna", "gpt-6-luna", "o3"])
+        self.assertEqual(self.sdk.call_args.kwargs["api_key"], "learner-key")
+        models.side_effect = AuthenticationError("bad key", response=Mock(status_code=401), body=None)
+        with self.assertRaisesRegex(LLMError, "credentials"):
+            list_models("wrong-key")

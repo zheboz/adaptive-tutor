@@ -49,5 +49,5 @@ def build_reading_check(
         options = tuple(values[n] for n in sorted(nearby))
         prompt = quote[:target.start()] + "____" + quote[target.end():]
         return Question("multiple_choice", prompt, options, options.index(answer), quote,
-                        "generated", (passage.source_id,), "reading", concept.id)
+                        "generated", (passage.source_id,), "reading", concept.id, quote, passage.source_id)
     return None

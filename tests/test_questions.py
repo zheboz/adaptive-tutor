@@ -83,16 +83,27 @@ class PracticeQuestionTests(unittest.TestCase):
         self.assertEqual(self.generate.call_count, 2)
         self.assertIn("correction", json.loads(self.generate.call_args.kwargs["content"]))
 
-    def test_original_claim_requires_full_printed_question(self):
+    def test_unverifiable_original_claims_become_generated_questions(self):
+        # Slides often print no exercise: a draft that claims one but rests on a verified learning
+        # point is kept, labeled as generated, with the reading as its only source.
         for change in (
-            {"prompt":"Which value is stored?", "answer_key":None}, {"options":["1", "2"]},
-            {"options":["1", "2", "13"]}, {"exercise":[]},
-            {"options":["1", "2"], "exercise":[
+            {"prompt": "Which value is stored?", "answer_key": None}, {"options": ["1", "2"]},
+            {"options": ["1", "2", "13"]}, {"exercise": []},
+            {"options": ["1", "2"], "exercise": [
                 Evidence(passage_id="p8-c2", quote=self.exercise.rsplit(" C.", 1)[0]),
             ]},
+            {"exercise": [Evidence(passage_id="p8-c2", quote="An invented exercise. A. 1 B. 2")]},
+            {"answer_key": Evidence(passage_id="p8-c2", quote="Answer: invented.")},
         ):
-            with self.subTest(change=change), self.assertRaises(PracticeError):
-                self.batch(self.original.model_copy(update=change), generate=_model_questions)
+            with self.subTest(change=change):
+                result, = self.batch(self.original.model_copy(update=change), generate=_model_questions)
+                self.assertEqual((result.origin, result.answer_origin), ("generated", "reference"))
+                self.assertEqual(result.source_ids, ("p1",))
+                self.assertEqual((result.evidence, result.evidence_source_id), (self.fact, "p1"))
+        # Without a learning point there is nothing left to stand on.
+        with self.assertRaises(PracticeError):
+            self.batch(self.original.model_copy(update={"options": ["1", "2", "13"], "concept_id": None}),
+                       generate=_model_questions)
 
     def test_bounded_validation_for_counts_choices_and_quotes(self):
         invalid = (
@@ -101,7 +112,9 @@ class PracticeQuestionTests(unittest.TestCase):
             [self.generated.model_copy(update={"correct_index":2})],
             [self.original.model_copy(update={"options":["x", "X"]})],
             [self.generated.model_copy(update={"explanation":" "})],
-            [self.generated.model_copy(update={"concept_id":"p1-invented"})],
+            # An invalid learning point ID with nothing in common with any learning point.
+            [self.generated.model_copy(update={"concept_id": "p1-c1", "prompt": "Mars is a red planet.",
+                                               "explanation": "Astronomy says so."})],
             [self.generated.model_copy(update={"concept_id":None})],
             [self.original.model_copy(update={"concept_id":None})],
         )
@@ -121,7 +134,7 @@ class PracticeQuestionTests(unittest.TestCase):
         self.generate.assert_called_once()
 
     def test_retains_verified_items_after_repeated_bad_sibling_or_failed_repair(self):
-        bad = self.original.model_copy(update={"options": ["1", "2", "13"]})
+        bad = self.original.model_copy(update={"options": ["1", "2", "13"], "concept_id": None})
         for retry in (QuestionBatch(questions=[bad]), LLMError("Request failed.")):
             with self.subTest(retry=retry):
                 self.generate.side_effect = [QuestionBatch(questions=[bad, self.generated]), retry]
@@ -207,3 +220,12 @@ class PracticeQuestionTests(unittest.TestCase):
         self.assertEqual(json.loads(self.generate.call_args.kwargs["content"])["questions_wanted"], 3)
         generate_questions(self.assignment, self.passages)
         self.assertNotIn("questions_wanted", json.loads(self.generate.call_args.kwargs["content"]))
+
+    def test_an_invalid_learning_point_id_is_matched_to_the_closest_point(self):
+        # Models sometimes copy a passage ID into concept_id; the question is still about a learning point.
+        draft = self.generated.model_copy(update={"concept_id": "p1-c1"})
+        result, = self.batch(draft, generate=_model_questions)
+        self.assertEqual(result.concept_id, self.concept_id)
+        self.assertEqual((result.evidence, result.evidence_source_id), (self.fact, "p1"))
+        prompt = self.generate.call_args.kwargs["instructions"]
+        self.assertIn("passage IDs such as p5-c1 are not learning points", prompt)
