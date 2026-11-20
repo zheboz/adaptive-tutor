@@ -29,7 +29,6 @@ class LearnerUITests(unittest.TestCase):
         self.generate = self.enterContext(patch("tutor.assessment.questions.generate_questions"))
         self.app = AppTest.from_file(APP).run()
         upload(self.app, "Assignment: x = 2.", "Iteration: loop twice.", "Counting: range(3).")
-        button(self.app.sidebar, "Generate outline").click().run()
 
     def status_text(self):
         show_view(self.app, "Progress")

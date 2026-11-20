@@ -5,7 +5,7 @@ from unittest.mock import patch
 from streamlit.testing.v1 import AppTest
 
 from tests.test_outline_ui import upload
-from tests.test_pdf_preview import APP, button
+from tests.test_pdf_preview import APP
 from tutor import llm
 from tutor.llm import LLMError
 from tutor.materials.outline import Outline, Topic
@@ -16,6 +16,8 @@ class SettingsUITests(unittest.TestCase):
         self.env = self.enterContext(patch.dict(os.environ, {}, clear=True))
         self.models = self.enterContext(patch("tutor.ui.settings.list_models"))
         self.models.return_value = ["gpt-4.1-mini", "gpt-5.6-luna", "gpt-6-luna", "o3", "chat-latest"]
+        # These tests are about the key and model; planning units in the background is not.
+        self.enterContext(patch("tutor.ui.units.start_planning"))
         self.app = AppTest.from_file(APP).run()
 
     def key_input(self):
@@ -54,7 +56,6 @@ class SettingsUITests(unittest.TestCase):
 
         with patch("tutor.materials.outline.generate_outline", side_effect=outline):
             upload(self.app, "Loops: range(3).")
-            button(self.app.sidebar, "Generate outline").click().run()
         self.assertEqual(seen, [("sk-learner", "gpt-6-luna")])
         self.assertNotIn("sk-learner", os.environ.values())
 
@@ -67,7 +68,6 @@ class SettingsUITests(unittest.TestCase):
                    side_effect=lambda pages: seen.append(llm.current_model()) or Outline(topics=[
                        Topic(title="Loops", summary="Repeat.", source_ids=["p1"])])):
             upload(self.app, "Loops: range(3).")
-            button(self.app.sidebar, "Generate outline").click().run()
         self.assertEqual(seen, ["gpt-5.6-luna"])
 
     def test_a_rejected_key_is_reported(self):
@@ -94,9 +94,8 @@ class SettingsUITests(unittest.TestCase):
                       [c.value for c in self.app.sidebar.caption])
         self.assertEqual(self.app.sidebar.selectbox(key="model_choice").value, "gpt-4.1-mini")
         self.models.assert_not_called()
-        # Without the learner's key, generating an outline asks for it.
+        # Without the learner's key, the outline waits for it and nothing is sent.
         with patch("tutor.llm.OpenAI") as sdk:
             upload(self.app, "Loops: range(3).")
-            button(self.app.sidebar, "Generate outline").click().run()
-        self.assertIn("Enter your OpenAI API key in the sidebar", self.app.sidebar.error[0].value)
+        self.assertIn("Enter your OpenAI API key in the sidebar", self.app.main.container("outline_panel").info[0].value)
         sdk.assert_not_called()

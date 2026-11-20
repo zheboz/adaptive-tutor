@@ -49,7 +49,6 @@ class CheckUITests(unittest.TestCase):
         self.enterContext(patch("tutor.agent.loop.call_with_tools", side_effect=self.model))
         self.app = AppTest.from_file(APP, default_timeout=10).run()
         upload(self.app, "Assignment: x = 2.", "Updates: x = x + 1.", "Loops: range(3).")
-        button(self.app.sidebar, "Generate outline").click().run()
         create_plan(self.app, 3)
 
     def panel(self):

@@ -26,13 +26,14 @@ class OutlineUITests(unittest.TestCase):
         self.app = AppTest.from_file(APP)
 
     @patch("tutor.materials.outline.generate_outline")
-    def test_generate_once_and_follow_source(self, generate):
+    def test_generated_once_on_upload_and_follow_source(self, generate):
         generate.return_value = self.outline
         self.app.run()
-        document = upload(self.app, "Course introduction", "Running totals")
         generate.assert_not_called()
-        button(self.app.sidebar, "Generate outline").click().run()
+        document = upload(self.app, "Course introduction", "Running totals")
+        # No button: the outline is the only next step, so it is generated as soon as the PDF is in.
         generate.assert_called_once()
+        self.assertNotIn("Generate outline", [item.label for item in self.app.button])
         topic_html = self.app.main.container("outline_panel").html[0].value
         self.assertIn(self.topic.title, topic_html)
         self.assertIn(escape(self.topic.summary), topic_html)
@@ -49,25 +50,40 @@ class OutlineUITests(unittest.TestCase):
         generate.return_value = self.outline
         self.app.run()
         upload(self.app, "First page", "Running totals")
-        button(self.app, "Generate outline").click().run()
         self.assertIn("Page 2", [item.label for item in self.app.button])
         upload(self.app, "")
         self.assertNotIn("Page 2", [item.label for item in self.app.button])
-        self.assertTrue(button(self.app, "Generate outline").disabled)
+        self.assertIn("no readable text", self.app.main.container("outline_panel").warning[0].value)
         self.app.file_uploader[0].clear().run()
         self.assertNotIn("Page 2", [item.label for item in self.app.button])
         generate.assert_called_once()
         self.assertFalse(self.app.exception)
 
     @patch("tutor.materials.outline.generate_outline")
-    def test_failed_request_can_be_retried_explicitly(self, generate):
+    def test_a_failed_request_waits_for_try_again(self, generate):
         generate.side_effect = [LLMError("The request failed."), self.outline]
+        self.enterContext(patch("tutor.ui.settings.list_models", return_value=[]))
+        self.enterContext(patch("tutor.ui.units.start_planning"))
         self.app.run()
+        self.app.sidebar.text_input(key="api_key_input").set_value("sk-learner").run()
         upload(self.app, "Course introduction", "Running totals")
-        button(self.app, "Generate outline").click().run()
-        self.assertTrue(self.app.error)
+        self.assertEqual(self.app.main.container("outline_panel").error[0].value, "The request failed.")
+        self.assertIn("could not be generated", self.app.main.container("steps").caption[0].value)
+        # Other interactions do not repeat the failed request.
+        self.app.selectbox[0].select(1).run()
+        self.assertEqual(generate.call_count, 1)
         self.assertFalse(self.app.exception)
-        button(self.app, "Generate outline").click().run()
+        button(self.app, "Try again").click().run()
         self.assertEqual(generate.call_count, 2)
         self.assertFalse(self.app.error)
         self.assertIn("Page 2", [item.label for item in self.app.button])
+
+    @patch("tutor.materials.outline.generate_outline")
+    def test_without_a_key_the_outline_waits_for_it(self, generate):
+        generate.side_effect = LLMError("Enter your OpenAI API key in the sidebar to use the tutor.")
+        self.app.run()
+        upload(self.app, "Course introduction", "Running totals")
+        self.assertIn("Enter your OpenAI API key in the sidebar",
+                      self.app.main.container("outline_panel").info[0].value)
+        self.assertNotIn("Try again", [item.label for item in self.app.button])
+        self.assertNotIn("outline_error", self.app.session_state)

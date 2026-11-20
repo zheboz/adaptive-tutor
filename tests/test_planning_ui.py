@@ -13,15 +13,21 @@ from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
 
 def finish_quiz(app):
     """Take the initial quiz with no questions, which leads straight to the plan controls."""
+    show_view(app, "Outline")
     with patch("tutor.assessment.questions.generate_questions", return_value=()):
-        button(app.sidebar, "Start initial quiz").click().run()
+        button(app.main.container("quiz_start"), "Start initial quiz").click().run()
 
 
 def create_plan(app, days):
-    if not any(widget.label == "Create study plan" for widget in app.sidebar.button):
+    """Create the plan below the quiz results, or change its days in the Plan view."""
+    if "planned_days" in app.session_state:
+        show_view(app, "Plan")
+    elif "quiz" in app.session_state and app.session_state["quiz"]["results"] is not None:
+        show_view(app, "Initial quiz")
+    else:
         finish_quiz(app)
-    app.sidebar.number_input(key="study_target_days").set_value(days)
-    button(app.sidebar, "Create study plan").click().run()
+    app.number_input(key="study_target_days").set_value(days)
+    button(app, "Create study plan").click().run()
 
 
 def show_view(app, name):
@@ -75,8 +81,7 @@ class PlanningUITests(unittest.TestCase):
         app = self.app
         generate.return_value = self.outline
         document = upload(app, "Variable updates", "Loop tracing")
-        self.assertIn("**2 · Outline**", app.main.container("steps").markdown[0].value)
-        button(app.sidebar, "Generate outline").click().run()
+        # The outline is generated on upload, so the learner lands on marking topics.
         left, right = document_row(app).children.values()
         self.assertEqual(previewed_pdf(left), (document, [1]))
         self.assertEqual(app.segmented_control(key="right_view").options, ["Outline"])
@@ -123,10 +128,10 @@ class PlanningUITests(unittest.TestCase):
         generate.return_value = self.outline
         document = upload(app, "Variable updates", "Loop tracing")
         self.assertFalse(app.number_input)
-        button(app, "Generate outline").click().run()
-        # The plan controls appear only after the initial quiz, which builds the units.
-        self.assertNotIn("study_target_days", [w.key for w in app.sidebar.number_input])
-        self.model.assert_not_called()
+        # The plan controls appear only after the initial quiz. The units are planned in the
+        # background as soon as the outline is ready, while the learner reads it.
+        self.assertNotIn("study_target_days", [w.key for w in app.number_input])
+        self.assertIn("units_started", app.session_state)
         finish_quiz(app)
         target = app.number_input(key="study_target_days")
         self.assertEqual(target.label, "Target duration (days)")
@@ -190,12 +195,10 @@ class PlanningUITests(unittest.TestCase):
         self.model.side_effect = [self.plan, self.solution, sort_plan, sort_solution]
         generate.side_effect = [self.outline, replacement]
         upload(app, "Variable updates", "Loop tracing")
-        button(app, "Generate outline").click().run()
         create_plan(app, 3)
 
         upload(app, "Sorting")
         self.assert_plan_cleared()
-        button(app, "Generate outline").click().run()
         finish_quiz(app)
         self.assertEqual(app.number_input(key="study_target_days").value, 7)
         create_plan(app, 20)
@@ -216,7 +219,6 @@ class PlanningUITests(unittest.TestCase):
             LLMError("Could not plan units."), self.plan, LLMError("Could not prepare tasks."), self.solution,
         ]
         upload(app, "Variable updates", "Loop tracing")
-        button(app, "Generate outline").click().run()
 
         # The units are built when the initial quiz starts; each failure can be retried there.
         finish_quiz(app)
@@ -246,7 +248,6 @@ class PlanningUITests(unittest.TestCase):
         app = self.app
         generate.return_value = self.outline
         upload(app, "Variable updates", "Loop tracing")
-        button(app, "Generate outline").click().run()
         create_plan(app, 5)
         units = app.session_state["study_units"]
         expected_days = app.session_state["study_plan"]

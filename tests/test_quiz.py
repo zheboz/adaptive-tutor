@@ -93,7 +93,6 @@ class QuizUITests(unittest.TestCase):
         self.generate = self.enterContext(patch("tutor.assessment.questions.generate_questions", side_effect=by_topic))
         self.app = AppTest.from_file(APP, default_timeout=10).run()
         self.document = upload(self.app, *[page.text for page in PAGES])
-        button(self.app.sidebar, "Generate outline").click().run()
 
     def panel(self):
         return self.app.main.container("quiz_panel")
@@ -104,15 +103,21 @@ class QuizUITests(unittest.TestCase):
         return "\n".join([visible_text(panel), *extra])
 
     def plan_controls(self):
-        return [w.label for w in self.app.sidebar.button if w.label == "Create study plan"]
+        return [w.label for w in self.app.button if w.label == "Create study plan"]
+
+    def start(self):
+        return self.app.main.container("quiz_start")
 
     def test_checked_topics_are_quizzed_in_order_then_answers_then_the_plan(self):
-        self.assertIn("Initial quiz", [s.value for s in self.app.sidebar.subheader])
+        # The quiz starts below the outline, where the topics are checked; the sidebar holds only setup.
+        self.assertIn("**Initial quiz**", [m.value for m in self.start().markdown])
+        self.assertEqual([b.label for b in self.app.sidebar.button], [])
         self.assertFalse(self.plan_controls())
         self.app.checkbox(key="weak_topic_2").check().run()      # Loops first
         self.app.checkbox(key="weak_topic_0").check().run()      # then Assignment
-        self.assertIn("One question for each topic you checked (2)", visible_text(self.app.sidebar))
-        button(self.app.sidebar, "Start initial quiz").click().run()
+        self.assertIn("One question for each topic you checked (2)", visible_text(self.start()))
+        button(self.start(), "Start initial quiz").click().run()
+        self.assertEqual(self.app.segmented_control(key="right_view").value, "Initial quiz")
         self.assertFalse(self.app.exception)
         self.assertEqual([m.value for m in self.panel().markdown][:2],
                          ["**Question 1 · Loops**", "**Question 2 · Assignment**"])
@@ -134,10 +139,13 @@ class QuizUITests(unittest.TestCase):
         self.assertIn("marked this topic as not understood but answered correctly", text)
         button(self.panel(), "Page 3").click().run()
         self.assertEqual(previewed_pdf(self.app), (self.document, [3]))
+        # The plan is created right below the results.
+        self.assertTrue(self.panel().number_input(key="study_target_days"))
         self.assertTrue(self.plan_controls())
-        self.assertIn("Done: 1 of 2 correct. More time for: Loops.", visible_text(self.app.sidebar))
         self.assertEqual(self.app.segmented_control(key="right_view").options,
                          ["Outline", "Initial quiz", "Progress"])
+        show_view(self.app, "Outline")
+        self.assertIn("Done: 1 of 2 correct. More time for: Loops.", visible_text(self.start()))
 
         create_plan(self.app, 4)
         self.assertEqual(self.app.session_state["planned_weak"], ("unit-1", "unit-2"))
@@ -146,13 +154,13 @@ class QuizUITests(unittest.TestCase):
         self.assertIn("Initial quiz: 1 of 2 correct. More time for: Loops.", plan)
         # Unit names show the outline topics they cover.
         self.assertIn("More time for: Variables (topics: Assignment; Updates); Loops", plan)
-        self.assertNotIn("Start initial quiz", [b.label for b in self.app.sidebar.button])
+        self.assertNotIn("Start initial quiz", [b.label for b in self.app.button])
         show_view(self.app, "Progress")
         self.assertIn("Initial quiz: 1 of 2 correct", [e.label for e in self.app.main.expander])
 
     def test_with_nothing_checked_up_to_three_topics_are_quizzed(self):
-        self.assertIn("up to 3 questions", visible_text(self.app.sidebar))
-        button(self.app.sidebar, "Start initial quiz").click().run()
+        self.assertIn("up to 3 questions", visible_text(self.start()))
+        button(self.start(), "Start initial quiz").click().run()
         self.assertEqual(len(self.panel().radio), 3)
         for item, option in (("quiz-1", "2"), ("quiz-2", "2"), ("quiz-3", "2")):
             self.app.radio(key=f"quiz_choice_{item}").set_value(option)
@@ -163,9 +171,26 @@ class QuizUITests(unittest.TestCase):
 
     def test_an_outage_can_be_retried(self):
         self.generate.side_effect = LLMError("Could not reach OpenAI.")
-        button(self.app.sidebar, "Start initial quiz").click().run()
+        button(self.start(), "Start initial quiz").click().run()
         self.assertIn("Could not reach OpenAI.", self.panel().error[0].value)
         self.assertFalse(self.plan_controls())
         self.generate.side_effect = by_topic
         button(self.panel(), "Try again").click().run()
         self.assertEqual(len(self.panel().radio), 3)
+
+    def test_the_quiz_can_be_skipped(self):
+        self.app.checkbox(key="weak_topic_2").check().run()
+        button(self.start(), "Skip the quiz").click().run()
+        self.generate.assert_not_called()
+        self.assertEqual(self.app.segmented_control(key="right_view").value, "Initial quiz")
+        self.assertIn("You skipped the initial quiz", self.text())
+        self.assertFalse(self.panel().radio)
+        self.assertTrue(self.plan_controls())
+        self.assertIn("**4 · Plan**", self.app.main.container("steps").markdown[0].value)
+        create_plan(self.app, 3)
+        # Checked topics still get more time.
+        self.assertEqual(self.app.session_state["planned_weak"], ("unit-2",))
+        show_view(self.app, "Plan")
+        self.assertIn("Initial quiz: skipped.", visible_text(self.app.main.container("plan_overview_panel")))
+        show_view(self.app, "Progress")
+        self.assertFalse([e for e in self.app.main.expander if e.label.startswith("Initial quiz")])
