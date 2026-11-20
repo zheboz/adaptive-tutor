@@ -5,7 +5,7 @@ from tutor import llm
 from tutor.llm import LLMError
 from tutor.materials import outline
 from tutor.materials.ingest import PdfInputError, PdfPage, read_pdf_pages
-from tutor.ui import check, learner, navigation, quiz, settings, tutor_chat, units, views
+from tutor.ui import cards, check, learner, navigation, quiz, settings, tutor_chat, units, views
 from tutor.ui.reader import READER_PANEL_HEIGHT, render_extracted_text, render_pdf_preview
 
 
@@ -14,7 +14,7 @@ def reset_preview() -> None:
         "pdf_pages", "pdf_page_number", "study_outline", "outline_error",
         "study_plan", "study_target_days", "planned_days", "passage_index",
         "learner_state", "planned_weak", "qa_session",
-        *units.UNIT_KEYS, *check.CHECK_KEYS, *quiz.QUIZ_KEYS, *navigation.NAVIGATION_KEYS,
+        *units.UNIT_KEYS, *cards.CARD_KEYS, *check.CHECK_KEYS, *quiz.QUIZ_KEYS, *navigation.NAVIGATION_KEYS,
     ):
         st.session_state.pop(key, None)
     learner.clear_weak_topics()
@@ -106,7 +106,7 @@ def render_outline_status(pages: list[PdfPage], has_key: bool) -> None:
         st.warning("This PDF has no readable text, so no outline can be made from it. Try a PDF "
                    "with selectable text.")
     elif not has_key:
-        st.info("Enter your OpenAI API key in the sidebar. The outline is generated as soon as it is in.")
+        st.info("Enter your OpenAI API key at the top of the page. The outline is generated as soon as it is in.")
     elif "outline_error" in st.session_state:
         st.error(st.session_state.outline_error)
         st.button("Try again", key="outline_retry", type="primary",
@@ -118,7 +118,7 @@ def render_outline_status(pages: list[PdfPage], has_key: bool) -> None:
 def current_step(result: outline.Outline | None, has_plan: bool, has_key: bool) -> tuple[int, str]:
     if result is None:
         if not has_key:
-            return 2, "enter your OpenAI API key in the sidebar; the outline is then generated for you."
+            return 2, "enter your OpenAI API key at the top; the outline is then generated for you."
         return 2, "the outline could not be generated; see the panel on the right."
     if not quiz.done():
         if quiz.started():
@@ -131,7 +131,7 @@ def current_step(result: outline.Outline | None, has_plan: bool, has_key: bool) 
 
 
 # The view bar stays at the top of the view panel; the view's content scrolls below it.
-VIEW_CONTENT_HEIGHT = READER_PANEL_HEIGHT - 90
+VIEW_CONTENT_HEIGHT = READER_PANEL_HEIGHT - 80
 
 
 def render_views(result: outline.Outline | None, pages: list[PdfPage], has_plan: bool, has_key: bool) -> None:
@@ -168,30 +168,52 @@ def render_views(result: outline.Outline | None, pages: list[PdfPage], has_plan:
                 views.render_progress(study_units)
 
 
+# The PDF and view panels fill the window below the top bar and the step bar; the numbers are the
+# space those take, the PDF's page controls and the view bar. Python's pixel heights are the fallback.
+_LAYOUT_CSS = """
+<style>
+[data-testid="stMainBlockContainer"] {
+    padding-inline: clamp(0.75rem, 2vw, 1.5rem);
+    padding-top: 4.25rem;
+}
+:root { --panel-height: max(460px, calc(100vh - 290px)); }
+.st-key-pdf_preview_panel, .st-key-view_panel { height: var(--panel-height) !important; }
+.st-key-pdf_page_view { height: calc(var(--panel-height) - 72px) !important; }
+.st-key-outline_panel, .st-key-quiz_panel, .st-key-plan_panel, .st-key-plan_overview_panel,
+.st-key-progress_panel { height: calc(var(--panel-height) - 80px) !important; }
+/* A compact upload box in the top bar. */
+.st-key-topbar [data-testid="stFileUploaderDropzone"] { padding-block: 0.4rem; }
+.st-key-topbar [data-testid="stFileUploaderDropzoneInstructions"] small { display: none; }
+/* Keep the arrow buttons' text labels accessible to screen readers. */
+.st-key-pdf_page_controls button [data-testid="stMarkdownContainer"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+</style>
+"""
+
+
+def render_top_bar():
+    """The learner's key, the model and the PDF, in one bar across the top of the page."""
+    with st.container(key="topbar", border=True):
+        key_column, model_column, upload_column = st.columns([4, 3, 5], vertical_alignment="top")
+        with key_column:
+            api_key = settings.render_key()
+        with model_column:
+            model = settings.render_model()
+        with upload_column:
+            upload = st.file_uploader("PDF to study", type=["pdf"], on_change=reset_preview)
+    return api_key, model, upload
+
+
 def main() -> None:
-    st.set_page_config(page_title="Study materials · Adaptive Tutor", layout="wide")
-    st.html("""
-        <style>
-        [data-testid="stMainBlockContainer"] {
-            padding-inline: clamp(0.75rem, 2vw, 1.5rem);
-            padding-top: 3rem;
-        }
-        /* Keep the arrow buttons' text labels accessible to screen readers. */
-        .st-key-pdf_page_controls button [data-testid="stMarkdownContainer"] {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            overflow: hidden;
-            clip-path: inset(50%);
-            white-space: nowrap;
-        }
-        </style>
-    """)
-    st.title("Study materials")
-    with st.sidebar:
-        st.header("Study setup")
-        api_key, model = settings.render_settings()
-        upload = st.file_uploader("Upload a PDF", type=["pdf"], on_change=reset_preview)
+    st.set_page_config(page_title="Adaptive Tutor", layout="wide", initial_sidebar_state="collapsed")
+    st.html(_LAYOUT_CSS)
+    api_key, model, upload = render_top_bar()
     # Every model call in this run, including those in background threads, uses this session's
     # key and model.
     with llm.using(api_key, model):
@@ -200,8 +222,8 @@ def main() -> None:
 
 def render_study(upload, has_key: bool) -> None:
     if upload is None:
-        views.render_steps(1, "upload a PDF in the sidebar.")
-        st.info("Upload a PDF in the sidebar to begin.")
+        views.render_steps(1, "upload a PDF at the top.")
+        st.info("Upload a PDF at the top to begin.")
         return
 
     if "pdf_pages" not in st.session_state:

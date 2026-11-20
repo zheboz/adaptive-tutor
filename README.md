@@ -27,7 +27,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-The outline, planning, quiz, check and tutor features call OpenAI with the key each learner enters in the sidebar; the app has no key of its own. Start the app from the project root:
+The outline, planning, quiz, check and tutor features call OpenAI with the key each learner enters at the top of the page; the app has no key of its own. Start the app from the project root:
 
 ```bash
 .venv/bin/python -m streamlit run app.py
@@ -37,18 +37,18 @@ Then open the app, enter your OpenAI API key under **OpenAI settings**, and choo
 
 ### Your OpenAI key and model
 
-Open **OpenAI settings** at the top of the sidebar and enter your OpenAI API key. It is hidden as you type; **Show API key** reveals it. The key is used only in your browser session: it is not saved, not shown to anyone else, and not written to the server's environment, so other people using the same app never use it.
+The bar at the top of the page holds **OpenAI API key**, **Model** and **PDF to study**; there is no sidebar. Enter your OpenAI API key: it is hidden as you type, and the eye button in the field shows or hides it. The key is used only in your browser session: it is not saved, not shown to anyone else, and not written to the server's environment, so other people using the same app never use it.
 
-**Model** starts with the default, `gpt-4.1-mini`, then recommended models from the newest (`gpt-6.2-sol`, `gpt-6-luna`, `gpt-5.6-luna` and others) down to `gpt-4o-mini`; each was checked with tool calls and structured outputs. Once your key is entered, the list keeps the recommended models your account has and adds its other chat models after them; **Other…** accepts any model ID. Pro models work but take about 50 seconds a call. The tutor needs a model that supports tool calls and structured outputs; if one fails, switch back to the default. Your key and model apply to everything in your session: the outline, the plan, the quiz, the daily checks and Ask the tutor.
+**Model** starts with the default, `gpt-6-luna`, then recommended models from the newest (`gpt-6.2-sol`, `gpt-5.6-luna` and others) down to `gpt-4o-mini`; each was checked with tool calls and structured outputs. Once your key is entered, the list keeps the recommended models your account has and adds its other chat models after them; when your account has no `gpt-6-luna`, the default becomes `gpt-4.1-mini`. **Other…** accepts any model ID. Pro models work but take about 50 seconds a call. The tutor needs a model that supports tool calls and structured outputs; if one fails, switch back to the default. Your key and model apply to everything in your session: the outline, the plan, the quiz, the daily checks and Ask the tutor.
 
 The app never uses a key from the server's environment: without your key, nothing is sent to OpenAI.
 
 ### Page layout
 
-A step bar at the top shows where you are (Upload › Outline › Mark & quiz › Plan › Study) and what to do next. The sidebar holds only the OpenAI settings and the upload; every other action is in the panel beside the PDF, where you are already looking. The PDF stays on the left in a panel with its page controls at the bottom. On the right, a panel of the same height, so the two line up, holds a row of views at the top; the selected view scrolls below it:
+A step bar at the top shows where you are (Upload › Outline › Mark & quiz › Plan › Study) and what to do next. The top bar holds only the key, the model and the upload; every other action is in the panel beside the PDF, where you are already looking. The PDF stays on the left in a panel with its page controls at the bottom; the page fits the panel's width and scrolls inside it when taller. On the right, a panel of the same height, so the two line up, holds a row of views at the top; the selected view scrolls below it. Both panels fill the window's height below the step bar (at least 460 pixels):
 
 - Before the plan: **Outline** (check the topics you don't understand, then start or skip the quiz at the end), **Initial quiz** (the questions, the answers, then the number of days and **Create study plan**) and **Progress**.
-- After the plan: **Today** (the open study day and its check), **Plan** (goal, length and checked days, every day in a table, plan changes, **Change the number of days** and the outline) and **Progress** (each unit's status and the initial quiz answers).
+- After the plan: **Today** (the open study day's knowledge points and its check), **Plan** (goal, length and checked days, every day in a table, plan changes, **Change the number of days** and the outline) and **Progress** (each unit's status and the initial quiz answers).
 
 **Ask the tutor** is always shown right below both panels, across the full width, from the moment a PDF is uploaded: it needs only the PDF, not the outline or the plan. The text read from the current page is in a collapsed **Extracted text** section at the bottom of the page.
 
@@ -56,7 +56,7 @@ Days are picked from a row of buttons: ✓ marks a checked day and ↻ a review 
 
 ### Generating an outline
 
-1. Upload a PDF in the sidebar. Use the up/down arrows or the page selector beneath the PDF to navigate the original document. **Extracted text** at the bottom of the page follows the selected page. The preview works offline.
+1. Upload a PDF in the top bar. Use the up/down arrows or the page selector beneath the PDF to navigate the original document. **Extracted text** at the bottom of the page follows the selected page. The preview works offline.
 2. The outline is generated as soon as the PDF and your key are in; there is no button to press. If the request fails, the reason and **Try again** appear beside the PDF; other interactions do not repeat it. Short documents use one model request. Longer documents are processed in batches; topics with matching titles are combined in page order. Blank, image-only, or unreadable pages are skipped.
 3. The outline appears to the right of the PDF. Select a page reference under a topic to check its summary against the original page. Switching pages reuses the outline. Removing or replacing the PDF clears it.
 
@@ -88,11 +88,25 @@ To go straight to the plan, select **Skip the quiz** instead. Nothing is graded,
 - When the material doesn't cover the question, the tutor says so and names the missing topic instead of answering from general knowledge.
 - It knows today's study units and the topics you marked as weak, and remembers the last few questions for follow-ups. The caption under the chat shows the model calls and tokens used so far.
 
+### Knowledge points for each day
+
+Each unit of the open day lists the 3–6 most important knowledge points its pages teach, in page order. Each point has a one-sentence explanation, a few details taken only from the pages, a page link that opens the page in the PDF, and, under **From page N**, the sentence of the page it comes from. The app checks that the words of that sentence are on the cited page in the same order (symbols, punctuation and the interleaving of slide columns are ignored), and drops a point whose quote is not; when none survive, the model is told why and tries once more. A title or agenda page says it has no points to list.
+
+A day's points are made when you open the day and kept for the session; the next day's are made in the background meanwhile, and a review day reuses its unit's points. If a request fails, **Try again** appears instead of repeating it on every interaction. The unit's objective, its study task and links to all of its pages stay below the points.
+
 ### Checking your understanding each day
 
-Study a day's readings and task, then select **Check my understanding** at the bottom of the day. Only then are questions prepared, from that day's pages alone; a review day gets fresh questions. When the day's pages have nothing the tutor can ask about, it says so for each unit; when you continue, the day is marked as checked and the plan is unchanged. When questions were made but none passed verification, **Try again** prepares them again.
+Study a day's knowledge points, readings and task, then select **Check my understanding** at the bottom of the day. The questions come from that day's pages alone, and are prepared in the background as soon as you open the day, so the check starts without waiting; a review day gets fresh questions. When the day's pages have nothing the tutor can ask about, it says so for each unit; when you continue, the day is marked as checked and the plan is unchanged. When questions were made but none passed verification, **Try again** prepares them again.
 
-Otherwise the tutor asks up to three questions, choosing each from your earlier answers and showing why. After every answer you see whether it was right, the correct answer, an explanation, and the supporting passage with a link to its page; at the end every answer is listed again. It reports a confirmed gap only after at least two wrong answers on a unit that outnumber the correct ones. A review day is added only when at least two answers in the check are wrong and they outnumber the right ones (2 of 2, 2 of 3 or 3 of 3), the same standard as a likely gap; otherwise the check says so and the plan stays as it is. A review goes at the end of the plan, for today's unit or, when your earlier answers show the cause is an earlier unit, for that unit. A review already planned is not added twice.
+Otherwise the tutor asks up to eight questions, at most three per unit, choosing each from your answers so far and showing why. Your answers in the check settle each unit studied that day:
+
+- 2 right and none wrong: **understood**, and it gets no more questions;
+- 2 wrong that outnumber the right ones: **needs review**, and it gets no more questions;
+- 1 right and 1 wrong: a third question decides (2 of 3 right is **mixed answers**, 1 of 3 is **needs review**).
+
+The tutor decides which unit to ask about next, spends the questions where the evidence is least clear, and stops early when every unit is settled. After every answer you see whether it was right, the correct answer, an explanation, and the supporting passage with a link to its page; at the end each unit's result and every answer are listed again.
+
+A review day is added at the end of the plan for each unit studied that day that needs review. When your earlier answers show that the cause is an earlier unit, that unit gets a review too. Without such a unit, the check says so and the plan stays as it is. A review already planned is not added twice.
 
 The plan shows your goal, how many days the plan now has, and how many you have checked. When reviews make the plan longer than your goal, it says by how much. **Plan changes** lists each change and the answers behind it.
 

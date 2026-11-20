@@ -42,7 +42,7 @@ class StructuredCallTests(unittest.TestCase):
         self.assertEqual(self.parse.call_args.kwargs["model"], "user-selected-model")
 
     def test_missing_key(self):
-        with using(None), self.assertRaisesRegex(LLMError, "sidebar"):
+        with using(None), self.assertRaisesRegex(LLMError, "top of the page"):
             self.request()
         self.sdk.assert_not_called()
 
@@ -134,7 +134,7 @@ class ToolCallTests(unittest.TestCase):
                     self.call()
 
     def test_missing_key_stops_before_a_request(self):
-        with using(None), self.assertRaisesRegex(LLMError, "sidebar"):
+        with using(None), self.assertRaisesRegex(LLMError, "top of the page"):
             self.call()
         self.sdk.assert_not_called()
 
@@ -157,17 +157,17 @@ class CredentialTests(unittest.TestCase):
             self.assertEqual(current_model(), "gpt-5.6-luna")
         self.assertEqual(self.sdk.call_args.kwargs["api_key"], "learner-key")
         self.assertEqual(self.parse.call_args.kwargs["model"], "gpt-5.6-luna")
-        # Without a model the default is gpt-4.1-mini, whatever the environment says.
+        # Without a model the default is gpt-6-luna, whatever the environment says.
         with using("learner-key"):
             self.request()
-        self.assertEqual(self.parse.call_args.kwargs["model"], "gpt-4.1-mini")
+        self.assertEqual(self.parse.call_args.kwargs["model"], "gpt-6-luna")
         self.assertNotIn("learner-key", os.environ.values())
 
     def test_without_the_learners_key_nothing_is_sent(self):
         for block in (using(None), using("", "gpt-6-luna")):
-            with self.subTest(block=block), block, self.assertRaisesRegex(LLMError, "sidebar"):
+            with self.subTest(block=block), block, self.assertRaisesRegex(LLMError, "top of the page"):
                 self.request()
-        with self.assertRaisesRegex(LLMError, "sidebar"):
+        with self.assertRaisesRegex(LLMError, "top of the page"):
             self.request()
         self.sdk.assert_not_called()
 
@@ -178,7 +178,7 @@ class CredentialTests(unittest.TestCase):
             context = contextvars.copy_context()
         with ThreadPoolExecutor(1) as pool:
             self.assertEqual(pool.submit(context.run, current_model).result(), "gpt-6-luna")
-            self.assertEqual(pool.submit(current_model).result(), "gpt-4.1-mini")
+            self.assertEqual(pool.submit(current_model).result(), "gpt-6-luna")
 
     def test_model_list_keeps_chat_models_without_snapshots(self):
         models = self.sdk.return_value.__enter__.return_value.models.list

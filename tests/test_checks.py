@@ -7,7 +7,10 @@ from tutor.agent.bank import QuestionBank
 from tutor.agent.loop import Ask, Done, advance, instructions, start_session
 from tutor.agent.replan import after_daily_check
 from tutor.agent.state import LearnerState
-from tutor.agent.tools import DAILY_QUESTIONS, Diagnosis, daily_config, initial_config, validate_finish
+from tutor.agent.tools import (
+    DAILY_QUESTIONS, PER_UNIT_QUESTIONS, Diagnosis, UnitTally, daily_config, initial_config, tally,
+    validate_finish,
+)
 from tutor.llm import LLMError, Trace, tracing
 from tutor.materials.ingest import PdfPage
 from tutor.planning import insert_review, schedule_units
@@ -21,14 +24,23 @@ class CheckConfigTests(unittest.TestCase):
     def setUp(self):
         self.state = LearnerState(UNITS)
 
-    def finish(self, config, **changes):
+    def finish(self, config, asked=(), **changes):
         arguments = {"primary_gap": "none", "status": "uncertain", "evidence": [],
                      "next_step": config.next_steps[0], "summary": "Summary."}
-        return validate_finish({**arguments, **changes}, self.state, config)
+        return validate_finish({**arguments, **changes}, self.state, config, asked)
+
+    def answer(self, unit_id, *results):
+        asked = []
+        for correct in results:
+            question_id = f"q{len(self.state.answers()) + 1}"
+            self.state.record(question_id, unit_id, "multiple_choice", correct, "diagnosis")
+            asked.append(question_id)
+        return asked
 
     def test_daily_questions_are_about_today_and_conclusions_may_name_earlier_units(self):
         config = daily_config(UNITS, ["unit-2"], day=2)
-        self.assertEqual((config.scope, config.today, config.max_questions), (("unit-1", "unit-2"), ("unit-2",), 3))
+        self.assertEqual((config.scope, config.today, config.max_questions, config.per_unit),
+                         (("unit-1", "unit-2"), ("unit-2",), 8, 3))
         self.assertEqual(config.askable, ("unit-2",))
         two_today = daily_config(UNITS, ["unit-2", "unit-3"], day=2, askable=["unit-3", "unit-1"])
         self.assertEqual(two_today.askable, ("unit-3",))
@@ -72,7 +84,57 @@ class CheckConfigTests(unittest.TestCase):
         self.assertEqual([u["unit_id"] for u in state_output["units"]], ["unit-1", "unit-2"])
         self.assertEqual(state_output["units"][0]["answers"][0]["source"], "quiz")
         self.assertIn("Unknown unit", model.outputs()[1]["error"])
-        self.assertEqual((step.question.unit_id, session.config.max_questions), ("unit-2", 3))
+        self.assertEqual((step.question.unit_id, session.config.max_questions), ("unit-2", 8))
+
+    def test_a_unit_is_settled_by_its_answers_in_this_check(self):
+        for right, wrong, verdict in ((0, 0, "open"), (1, 0, "open"), (1, 1, "open"), (2, 0, "understood"),
+                                      (0, 2, "gap"), (2, 1, "mixed"), (1, 2, "gap"), (3, 0, "understood")):
+            with self.subTest(right=right, wrong=wrong):
+                self.assertEqual(UnitTally(right, wrong).verdict(), verdict)
+        # Only this check's answers count; earlier quiz answers do not.
+        self.state.record("quiz-1", "unit-2", "multiple_choice", False, "quiz")
+        asked = self.answer("unit-2", True, True)
+        self.assertEqual(tally(self.state, ["quiz-0", *asked]), {"unit-2": UnitTally(2, 0)})
+
+    def test_daily_conclusions_follow_the_settled_units(self):
+        config = daily_config(UNITS, ["unit-2", "unit-3"], day=2)
+        understood = self.answer("unit-2", True, True)
+        # "none" needs every unit studied today understood in this check.
+        self.assertIn("unit-3", self.finish(config, understood, status="confirmed"))
+        both = understood + self.answer("unit-3", True, True)
+        self.assertIsNone(self.finish(config, both, status="confirmed"))
+        # A gap in this check rules out continue, and confirms a gap even when earlier answers were right.
+        self.state.record("quiz-1", "unit-3", "multiple_choice", True, "quiz")
+        self.state.record("quiz-2", "unit-3", "multiple_choice", True, "quiz")
+        gap = understood + self.answer("unit-3", False, False)
+        self.assertEqual(self.state.status("unit-3"), "uncertain")
+        self.assertIn("ended this check as a gap", self.finish(config, gap))
+        self.assertIsNone(self.finish(config, gap, primary_gap="unit-3", status="confirmed",
+                                      evidence=gap[-2:], next_step="review_today"))
+
+    def test_settled_units_get_no_more_questions(self):
+        config = daily_config(UNITS, ["unit-2", "unit-3"], day=2)
+        session = start_session(UNITS, self.state, FakeBank(), config)
+        model = ScriptedModel(
+            turn("ask_question", 1, unit_id="unit-2", reason="First."),
+            turn("ask_question", 2, unit_id="unit-2", reason="Second."),
+            turn("ask_question", 3, unit_id="unit-2", reason="Again."),
+            turn("get_learner_state", 4),
+            turn("ask_question", 5, unit_id="unit-3", reason="Next unit."),
+        )
+        with patch("tutor.agent.loop.call_with_tools", side_effect=model):
+            advance(session)
+            advance(session, 0)                  # right
+            step = advance(session, 0)           # right: unit-2 is understood
+        self.assertEqual(model.outputs()[1]["unit_this_check"],
+                         {"right": 2, "wrong": 0, "verdict": "understood", "can_ask_more": False})
+        self.assertIn("unit-2 is settled in this check (understood: 2 right, 0 wrong)", model.outputs()[2]["error"])
+        units = {u["unit_id"]: u for u in model.outputs()[3]["units"]}
+        self.assertFalse(units["unit-2"]["this_check"]["can_ask_more"])
+        self.assertEqual(units["unit-3"]["this_check"]["verdict"], "open")
+        self.assertNotIn("this_check", units["unit-1"])
+        self.assertEqual(step.question.unit_id, "unit-3")
+        self.assertIn(f"at most {PER_UNIT_QUESTIONS} questions in this check", instructions(config))
 
 
 class FocusAndReplanTests(unittest.TestCase):
@@ -113,14 +175,15 @@ class FocusAndReplanTests(unittest.TestCase):
         review = updated[3].assignments[0]
         self.assertEqual((review.unit.unit_id, review.kind, review.round), ("unit-2", "review", 1))
         self.assertTrue(change.changed)
-        self.assertIn("Added a review of Variable updates as day 4, at the end of the plan", change.message)
+        self.assertIn("Added a review of Variable updates as day 4 (today's answers show it needs another "
+                      "session; 1 of 3 correct in this check), at the end of the plan.", change.message)
         self.assertIn("unit-2", self.state.flagged)
         # A review already planned later is not added again.
         again, note = after_daily_check(self.state, diagnosis("unit-2", "confirmed", "review_today"), updated, 2,
                                         asked)
         self.assertEqual(again, updated)
         self.assertFalse(note.changed)
-        self.assertIn("already planned for day 4, so no day was added", note.message)
+        self.assertIn("No day was added: a review of Variable updates is already planned for day 4", note.message)
 
     def test_which_checks_add_a_review(self):
         days = schedule_units(UNITS, 3)
@@ -134,18 +197,29 @@ class FocusAndReplanTests(unittest.TestCase):
                 self.assertEqual(len(updated) == 4, added)
                 self.assertEqual(change.changed, added)
                 if not added:
-                    self.assertIn(f"{wrong} of {wrong + right} answers in this check were wrong", change.message)
-                    self.assertIn("at least 2 answers are wrong and they outnumber the right ones", change.message)
+                    self.assertIn("no unit studied today ended this check as a gap", change.message)
+                    self.assertIn("at least 2 wrong answers in a check and they outnumber the right ones",
+                                  change.message)
 
-    def test_revisit_names_the_earlier_unit_and_no_gap_reviews_the_weakest_today(self):
+    def test_revisit_reviews_the_earlier_unit_and_todays_gap(self):
         days = schedule_units(UNITS, 3)
         asked = self.wrong_answers("unit-3", 2)
         updated, change = after_daily_check(self.state, diagnosis("unit-1", next_step="revisit_earlier"), days, 3,
                                             asked)
-        self.assertEqual(updated[3].assignments[0].unit.unit_id, "unit-1")
+        self.assertEqual([d.assignments[0].unit.unit_id for d in updated[3:]], ["unit-1", "unit-3"])
         self.assertIn("comes from this earlier unit", change.message)
         updated, _ = after_daily_check(self.state, diagnosis(next_step="review_today"), days, 3, asked)
-        self.assertEqual(updated[3].assignments[0].unit.unit_id, "unit-3")
+        self.assertEqual([d.assignments[0].unit.unit_id for d in updated[3:]], ["unit-3"])
+
+    def test_every_gap_today_gets_a_review(self):
+        days = schedule_units(UNITS, 1)
+        asked = (self.wrong_answers("unit-1", 2) + self.wrong_answers("unit-2", 0, right=2)
+                 + self.wrong_answers("unit-3", 2, right=1))
+        updated, change = after_daily_check(self.state, diagnosis("unit-1", "confirmed", "review_today"), days, 1,
+                                            asked)
+        self.assertEqual([d.assignments[0].unit.unit_id for d in updated[1:]], ["unit-1", "unit-3"])
+        self.assertIn("Added a review of Assignment as day 2", change.message)
+        self.assertIn("and of Loop counts as day 3", change.message)
 
     def test_each_review_round_is_numbered(self):
         days = schedule_units(UNITS, 3)

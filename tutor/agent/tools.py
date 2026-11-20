@@ -3,9 +3,14 @@
 The same agent runs two kinds of check, configured by ``CheckConfig``:
 
 - initial: before studying, check the units the learner marked weak (up to 5 questions, all units)
-- daily:   after a study day, ask up to 3 questions from that day's pages, then decide whether to
-           continue, review today's material, or revisit an earlier unit whose earlier answers show
-           it is the cause
+- daily:   after a study day, ask up to 8 questions from that day's pages, at most 3 per unit, then
+           decide whether to continue, review today's material, or revisit an earlier unit whose
+           earlier answers show it is the cause
+
+In a daily check each unit is settled by its answers in this check (``UnitTally``): two right and
+none wrong means understood, two wrong that outnumber the right ones means a gap, and after one of
+each a third question decides. Code stops questions on a settled unit; the agent decides which unit
+to ask about next and when the evidence is enough.
 """
 
 from collections.abc import Sequence
@@ -18,7 +23,11 @@ from .state import LearnerState
 
 
 MAX_QUESTIONS = 5
-DAILY_QUESTIONS = 3
+DAILY_QUESTIONS = 8
+PER_UNIT_QUESTIONS = 3
+# A unit is a gap with at least this many wrong answers that outnumber the right ones, and understood
+# with this many right answers and none wrong: the same standard as the learner's unit status.
+SETTLING_ANSWERS = 2
 INITIAL_STEPS = ("review_gap", "continue")
 DAILY_STEPS = ("continue", "review_today", "revisit_earlier")
 
@@ -33,6 +42,8 @@ class CheckConfig:
     day: int | None = None
     # Units the tutor may ask about; empty means every unit in scope.
     ask_scope: tuple[str, ...] = ()
+    # Questions per unit in this check; None means no limit and no settling.
+    per_unit: int | None = None
 
     @property
     def askable(self) -> tuple[str, ...]:
@@ -50,7 +61,53 @@ def daily_config(units: Sequence[StudyUnit], today: Sequence[str], day: int,
     today = tuple(dict.fromkeys(unit_id for unit_id in today if unit_id in order))
     last = max(order.index(unit_id) for unit_id in today)
     ask = tuple(unit_id for unit_id in (today if askable is None else askable) if unit_id in today)
-    return CheckConfig("daily", tuple(order[:last + 1]), DAILY_QUESTIONS, DAILY_STEPS, today, day, ask or today)
+    return CheckConfig("daily", tuple(order[:last + 1]), DAILY_QUESTIONS, DAILY_STEPS, today, day, ask or today,
+                       PER_UNIT_QUESTIONS)
+
+
+Verdict = Literal["open", "understood", "mixed", "gap"]
+
+
+@dataclass(frozen=True)
+class UnitTally:
+    """One unit's answers in this check."""
+    right: int = 0
+    wrong: int = 0
+
+    @property
+    def answered(self) -> int:
+        return self.right + self.wrong
+
+    def verdict(self, per_unit: int = PER_UNIT_QUESTIONS) -> Verdict:
+        if self.wrong >= SETTLING_ANSWERS and self.wrong > self.right:
+            return "gap"
+        if self.right >= SETTLING_ANSWERS and self.wrong == 0:
+            return "understood"
+        if self.answered >= per_unit:
+            return "mixed"
+        return "open"
+
+    def as_dict(self, per_unit: int = PER_UNIT_QUESTIONS) -> dict[str, Any]:
+        verdict = self.verdict(per_unit)
+        return {"right": self.right, "wrong": self.wrong, "verdict": verdict, "can_ask_more": verdict == "open"}
+
+
+def tally(state: LearnerState, asked: Sequence[str]) -> dict[str, UnitTally]:
+    """Right and wrong answers per unit among this check's questions; unanswered ones do not count."""
+    counts: dict[str, list[int]] = {}
+    for question_id in asked:
+        answer = state.answer(question_id)
+        if answer is not None:
+            counts.setdefault(answer.unit_id, [0, 0])[0 if answer.correct else 1] += 1
+    return {unit_id: UnitTally(right, wrong) for unit_id, (right, wrong) in counts.items()}
+
+
+def check_gaps(state: LearnerState, asked: Sequence[str], config: CheckConfig) -> tuple[str, ...]:
+    """Today's units that ended this check as a gap, in study order."""
+    tallies = tally(state, asked)
+    per_unit = config.per_unit or PER_UNIT_QUESTIONS
+    return tuple(unit_id for unit_id in config.today
+                 if tallies.get(unit_id, UnitTally()).verdict(per_unit) == "gap")
 
 
 @dataclass(frozen=True)
@@ -111,9 +168,13 @@ def tool_schemas(units: Sequence[StudyUnit], config: CheckConfig | None = None) 
     ]
 
 
-def _check_next_step(gap: str, status: str, next_step: str, config: CheckConfig) -> str | None:
+def _check_next_step(gap: str, status: str, next_step: str, config: CheckConfig,
+                     today_gaps: Sequence[str] = ()) -> str | None:
     if next_step not in config.next_steps:
         return f"next_step must be one of {', '.join(config.next_steps)}."
+    if today_gaps and next_step == "continue":
+        return (f"{', '.join(today_gaps)} ended this check as a gap; choose review_today, or revisit_earlier "
+                "when an earlier unit is the cause.")
     if status == "confirmed" and gap != "none" and next_step == "continue":
         return "A confirmed gap needs review; choose a review step instead of continue."
     if config.mode == "initial":
@@ -127,8 +188,12 @@ def _check_next_step(gap: str, status: str, next_step: str, config: CheckConfig)
     return None
 
 
-def validate_finish(arguments: dict[str, Any], state: LearnerState, config: CheckConfig | None = None) -> str | None:
-    """Return why the conclusion is not supported, or None when it can be accepted."""
+def validate_finish(arguments: dict[str, Any], state: LearnerState, config: CheckConfig | None = None,
+                    asked: Sequence[str] = ()) -> str | None:
+    """Return why the conclusion is not supported, or None when it can be accepted.
+
+    `asked` are this check's questions, which settle today's units in a daily check.
+    """
     config = config or initial_config([evidence.unit for evidence in state.units.values()])
     gap = arguments.get("primary_gap")
     status = arguments.get("status")
@@ -137,7 +202,9 @@ def validate_finish(arguments: dict[str, Any], state: LearnerState, config: Chec
         return f"Unknown unit {gap!r}. Use a unit_id from the list or 'none'."
     if status not in ("confirmed", "uncertain"):
         return "status must be 'confirmed' or 'uncertain'."
-    problem = _check_next_step(gap, status, arguments.get("next_step"), config)
+    settling = config.per_unit is not None
+    today_gaps = check_gaps(state, asked, config) if settling else ()
+    problem = _check_next_step(gap, status, arguments.get("next_step"), config, today_gaps)
     if problem:
         return problem
     if not str(arguments.get("summary", "")).strip():
@@ -157,8 +224,15 @@ def validate_finish(arguments: dict[str, Any], state: LearnerState, config: Chec
             return f"The answers show a likely gap in {', '.join(gaps)}; it cannot be 'none'."
         if len(answers) < 2:
             return "One answer cannot rule out every gap. Ask another question or finish as 'uncertain'."
+        if settling:
+            tallies = tally(state, asked)
+            unsettled = [unit_id for unit_id in config.askable
+                         if tallies.get(unit_id, UnitTally()).verdict(config.per_unit) != "understood"]
+            if unsettled:
+                return (f"Not every unit studied today is understood in this check: {', '.join(unsettled)}. "
+                        "Ask about them, or finish with status 'uncertain'.")
         return None
-    if state.status(gap) != "gap":
+    if state.status(gap) != "gap" and gap not in today_gaps:
         return (f"{gap} has status '{state.status(gap)}'. A confirmed gap needs at least two wrong answers "
                 "on that unit that outnumber the correct ones. Ask another question on it, or finish "
                 "with status 'uncertain'.")

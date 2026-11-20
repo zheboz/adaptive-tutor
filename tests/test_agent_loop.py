@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from tutor.agent.bank import DiagnosticQuestion, QuestionBank
-from tutor.agent.loop import MAX_MODEL_CALLS, Ask, Done, advance, start_session
+from tutor.agent.loop import Ask, Done, advance, max_model_calls, start_session
 from tutor.agent.state import LearnerState
 from tutor.agent.tools import MAX_QUESTIONS, tool_schemas, validate_finish
 from tutor.assessment.questions import PracticeError, Question
@@ -156,11 +156,13 @@ class DiagnosisLoopTests(unittest.TestCase):
 
     def test_call_limit_ends_with_an_uncertain_diagnosis(self):
         self.state.apply_report(["unit-2"])
-        self.script(*[turn("get_learner_state", n) for n in range(MAX_MODEL_CALLS)])
+        limit = max_model_calls(self.session.config)
+        self.assertEqual(limit, 12)  # 5 questions in the initial check, plus 7
+        self.script(*[turn("get_learner_state", n) for n in range(limit)])
         done = advance(self.session)
         self.assertTrue(done.diagnosis.forced)
         self.assertEqual((done.diagnosis.primary_gap, done.diagnosis.status), ("unit-2", "uncertain"))
-        self.assertEqual(self.session.model_calls, MAX_MODEL_CALLS)
+        self.assertEqual(self.session.model_calls, limit)
 
     def test_unavailable_questions_are_reported_to_the_model(self):
         self.bank.questions["unit-1"] = []

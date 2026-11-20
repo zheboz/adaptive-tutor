@@ -22,7 +22,9 @@ from pydantic import BaseModel, ValidationError
 
 
 T = TypeVar("T", bound=BaseModel)
-DEFAULT_MODEL = "gpt-4.1-mini"
+DEFAULT_MODEL = "gpt-6-luna"
+# For accounts without the default: widely available, with tool calls and structured outputs.
+FALLBACK_MODEL = "gpt-4.1-mini"
 # Details of failed requests go to the server log (the terminal running the app), never to the page.
 logger = logging.getLogger(__name__)
 
@@ -138,7 +140,7 @@ def _request(name: str, send: Callable[[OpenAI, str], Any]) -> Any:
     """Send one request with this session's key and model, and record its span."""
     api_key = _api_key()
     if not api_key:
-        raise LLMError("Enter your OpenAI API key in the sidebar to use the tutor.")
+        raise LLMError("Enter your OpenAI API key at the top of the page to use the tutor.")
     model = current_model()
     start = time.perf_counter()
     try:
@@ -238,7 +240,7 @@ def list_models(api_key: str | None = None) -> list[str]:
     """Chat model IDs the key can use, for a model picker. Errors are safe to show."""
     api_key = api_key or _api_key()
     if not api_key:
-        raise LLMError("Enter your OpenAI API key in the sidebar to use the tutor.")
+        raise LLMError("Enter your OpenAI API key at the top of the page to use the tutor.")
     try:
         with _client(api_key) as client:
             ids = [model.id for model in client.models.list()]
