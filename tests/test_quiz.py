@@ -109,9 +109,9 @@ class QuizUITests(unittest.TestCase):
         return self.app.main.container("quiz_start")
 
     def test_checked_topics_are_quizzed_in_order_then_answers_then_the_plan(self):
-        # The quiz starts below the outline, where the topics are checked; the sidebar holds only setup.
+        # The quiz starts below the outline, where the topics are checked; there is no sidebar.
         self.assertIn("**Initial quiz**", [m.value for m in self.start().markdown])
-        self.assertEqual([b.label for b in self.app.sidebar.button], [])
+        self.assertFalse(self.app.sidebar.children)
         self.assertFalse(self.plan_controls())
         self.app.checkbox(key="weak_topic_2").check().run()      # Loops first
         self.app.checkbox(key="weak_topic_0").check().run()      # then Assignment

@@ -51,7 +51,7 @@ class LearnerUITests(unittest.TestCase):
         self.assertIn("More time for: Iteration", self.plan_text())
         self.assertIn("Iteration · Marked weak · not checked yet", self.status_text())
         self.assertIn("Assignment · Not checked yet", self.status_text())
-        self.assertFalse(self.app.sidebar.text_area)
+        self.assertFalse(self.app.text_area)
         # A long plan gives the weak unit a review day.
         self.plan(6)
         kinds = [(a.unit.title, a.kind) for day in self.app.session_state["study_plan"] for a in day.assignments]

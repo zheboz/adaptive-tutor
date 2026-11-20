@@ -16,14 +16,17 @@ def show_page(number: int) -> None:
 
 
 def render_pdf_preview(upload: UploadedFile, pages: list[PdfPage]) -> PdfPage:
-    """The page and its controls in one panel, as tall as the view panel beside it."""
+    """The page and its controls in one panel, as tall as the view panel beside it; both fill the
+    window's height (see the layout CSS in app.py)."""
     count = len(pages)
     page = pages[st.session_state.get("pdf_page_number", 1) - 1]
     with st.container(key="pdf_preview_panel", height=READER_PANEL_HEIGHT, border=True, gap="xsmall"):
-        pdf_viewer(
-            upload.getvalue(), pages_to_render=[page.number], render_text=True,
-            height=READER_PANEL_HEIGHT - 100, zoom_level="auto", key=f"original_pdf_{upload.file_id}_{page.number}",
-        )
+        # The whole page at the panel's width; it scrolls inside the panel when taller.
+        with st.container(key="pdf_page_view", height=READER_PANEL_HEIGHT - 72, border=False):
+            pdf_viewer(
+                upload.getvalue(), pages_to_render=[page.number], render_text=True, zoom_level="auto",
+                key=f"original_pdf_{upload.file_id}_{page.number}",
+            )
         with st.container(key="pdf_page_controls", horizontal=True, horizontal_alignment="center", gap=4):
             st.button(
                 "Previous page", icon=":material/arrow_upward:", help="Previous page", width=_ARROW_WIDTH,

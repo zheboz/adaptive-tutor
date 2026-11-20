@@ -27,7 +27,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-The outline, planning, quiz, check and tutor features call OpenAI with the key each learner enters in the sidebar; the app has no key of its own. Start the app from the project root:
+The outline, planning, quiz, check and tutor features call OpenAI with the key each learner enters at the top of the page; the app has no key of its own. Start the app from the project root:
 
 ```bash
 .venv/bin/python -m streamlit run app.py
@@ -37,15 +37,15 @@ Then open the app, enter your OpenAI API key under **OpenAI settings**, and choo
 
 ### Your OpenAI key and model
 
-Open **OpenAI settings** at the top of the sidebar and enter your OpenAI API key. It is hidden as you type; **Show API key** reveals it. The key is used only in your browser session: it is not saved, not shown to anyone else, and not written to the server's environment, so other people using the same app never use it.
+The bar at the top of the page holds **OpenAI API key**, **Model** and **PDF to study**; there is no sidebar. Enter your OpenAI API key: it is hidden as you type, and the eye button in the field shows or hides it. The key is used only in your browser session: it is not saved, not shown to anyone else, and not written to the server's environment, so other people using the same app never use it.
 
-**Model** starts with the default, `gpt-4.1-mini`, then recommended models from the newest (`gpt-6.2-sol`, `gpt-6-luna`, `gpt-5.6-luna` and others) down to `gpt-4o-mini`; each was checked with tool calls and structured outputs. Once your key is entered, the list keeps the recommended models your account has and adds its other chat models after them; **Other…** accepts any model ID. Pro models work but take about 50 seconds a call. The tutor needs a model that supports tool calls and structured outputs; if one fails, switch back to the default. Your key and model apply to everything in your session: the outline, the plan, the quiz, the daily checks and Ask the tutor.
+**Model** starts with the default, `gpt-6-luna`, then recommended models from the newest (`gpt-6.2-sol`, `gpt-5.6-luna` and others) down to `gpt-4o-mini`; each was checked with tool calls and structured outputs. Once your key is entered, the list keeps the recommended models your account has and adds its other chat models after them; when your account has no `gpt-6-luna`, the default becomes `gpt-4.1-mini`. **Other…** accepts any model ID. Pro models work but take about 50 seconds a call. The tutor needs a model that supports tool calls and structured outputs; if one fails, switch back to the default. Your key and model apply to everything in your session: the outline, the plan, the quiz, the daily checks and Ask the tutor.
 
 The app never uses a key from the server's environment: without your key, nothing is sent to OpenAI.
 
 ### Page layout
 
-A step bar at the top shows where you are (Upload › Outline › Mark & quiz › Plan › Study) and what to do next. The sidebar holds only the OpenAI settings and the upload; every other action is in the panel beside the PDF, where you are already looking. The PDF stays on the left in a panel with its page controls at the bottom. On the right, a panel of the same height, so the two line up, holds a row of views at the top; the selected view scrolls below it:
+A step bar at the top shows where you are (Upload › Outline › Mark & quiz › Plan › Study) and what to do next. The top bar holds only the key, the model and the upload; every other action is in the panel beside the PDF, where you are already looking. The PDF stays on the left in a panel with its page controls at the bottom; the page fits the panel's width and scrolls inside it when taller. On the right, a panel of the same height, so the two line up, holds a row of views at the top; the selected view scrolls below it. Both panels fill the window's height below the step bar (at least 460 pixels):
 
 - Before the plan: **Outline** (check the topics you don't understand, then start or skip the quiz at the end), **Initial quiz** (the questions, the answers, then the number of days and **Create study plan**) and **Progress**.
 - After the plan: **Today** (the open study day's knowledge points and its check), **Plan** (goal, length and checked days, every day in a table, plan changes, **Change the number of days** and the outline) and **Progress** (each unit's status and the initial quiz answers).
@@ -56,7 +56,7 @@ Days are picked from a row of buttons: ✓ marks a checked day and ↻ a review 
 
 ### Generating an outline
 
-1. Upload a PDF in the sidebar. Use the up/down arrows or the page selector beneath the PDF to navigate the original document. **Extracted text** at the bottom of the page follows the selected page. The preview works offline.
+1. Upload a PDF in the top bar. Use the up/down arrows or the page selector beneath the PDF to navigate the original document. **Extracted text** at the bottom of the page follows the selected page. The preview works offline.
 2. The outline is generated as soon as the PDF and your key are in; there is no button to press. If the request fails, the reason and **Try again** appear beside the PDF; other interactions do not repeat it. Short documents use one model request. Longer documents are processed in batches; topics with matching titles are combined in page order. Blank, image-only, or unreadable pages are skipped.
 3. The outline appears to the right of the PDF. Select a page reference under a topic to check its summary against the original page. Switching pages reuses the outline. Removing or replacing the PDF clears it.
 

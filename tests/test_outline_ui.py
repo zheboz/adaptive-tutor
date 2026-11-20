@@ -38,10 +38,10 @@ class OutlineUITests(unittest.TestCase):
         self.assertIn(self.topic.title, topic_html)
         self.assertIn(escape(self.topic.summary), topic_html)
         button(self.app, "Page 2").click().run()
-        self.assertEqual(self.app.selectbox[0].value, 2)
+        self.assertEqual(self.app.selectbox(key="pdf_page_number").value, 2)
         self.assertEqual(previewed_pdf(self.app), (document, [2]))
         self.assertEqual(self.app.code[0].value.strip(), "Running totals")
-        self.app.selectbox[0].select(1).run()
+        self.app.selectbox(key="pdf_page_number").select(1).run()
         generate.assert_called_once()
         self.assertFalse(self.app.exception)
 
@@ -65,12 +65,12 @@ class OutlineUITests(unittest.TestCase):
         self.enterContext(patch("tutor.ui.settings.list_models", return_value=[]))
         self.enterContext(patch("tutor.ui.units.start_planning"))
         self.app.run()
-        self.app.sidebar.text_input(key="api_key_input").set_value("sk-learner").run()
+        self.app.text_input(key="api_key_input").set_value("sk-learner").run()
         upload(self.app, "Course introduction", "Running totals")
         self.assertEqual(self.app.main.container("outline_panel").error[0].value, "The request failed.")
         self.assertIn("could not be generated", self.app.main.container("steps").caption[0].value)
         # Other interactions do not repeat the failed request.
-        self.app.selectbox[0].select(1).run()
+        self.app.selectbox(key="pdf_page_number").select(1).run()
         self.assertEqual(generate.call_count, 1)
         self.assertFalse(self.app.exception)
         button(self.app, "Try again").click().run()
@@ -80,10 +80,10 @@ class OutlineUITests(unittest.TestCase):
 
     @patch("tutor.materials.outline.generate_outline")
     def test_without_a_key_the_outline_waits_for_it(self, generate):
-        generate.side_effect = LLMError("Enter your OpenAI API key in the sidebar to use the tutor.")
+        generate.side_effect = LLMError("Enter your OpenAI API key at the top of the page to use the tutor.")
         self.app.run()
         upload(self.app, "Course introduction", "Running totals")
-        self.assertIn("Enter your OpenAI API key in the sidebar",
+        self.assertIn("Enter your OpenAI API key at the top of the page",
                       self.app.main.container("outline_panel").info[0].value)
         self.assertNotIn("Try again", [item.label for item in self.app.button])
         self.assertNotIn("outline_error", self.app.session_state)

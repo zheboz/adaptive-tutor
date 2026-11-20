@@ -1,4 +1,5 @@
-"""The learner's own OpenAI key and model, in the sidebar. The app has no key of its own.
+"""The learner's own OpenAI key and model, in the bar at the top of the page. The app has no key of
+its own.
 
 The key stays in this browser session only: it is not saved, and never written to the process
 environment shared by every session.
@@ -8,7 +9,7 @@ from hashlib import sha256
 
 import streamlit as st
 
-from tutor.llm import DEFAULT_MODEL, LLMError, list_models
+from tutor.llm import DEFAULT_MODEL, FALLBACK_MODEL, LLMError, list_models
 
 
 OTHER = "Other…"
@@ -18,9 +19,10 @@ OTHER = "Other…"
 RECOMMENDED_MODELS = (
     "gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna", "gpt-6-astra",
     "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano",
-    "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano", "o3", "gpt-4.1", "gpt-4o", "gpt-4o-mini",
+    "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano", "o3", "gpt-4.1", "gpt-4.1-mini", "gpt-4o",
+    "gpt-4o-mini",
 )
-SETTINGS_KEYS = ("api_key_input", "show_api_key", "model_choice", "model_other", "model_options",
+SETTINGS_KEYS = ("api_key_input", "model_choice", "model_other", "model_options",
                  "model_options_for", "model_options_error")
 
 
@@ -40,6 +42,14 @@ def _load_models(api_key: str) -> None:
     st.session_state.model_options_for = _fingerprint(api_key)
 
 
+def default_model() -> str:
+    """gpt-6-luna, unless the learner's account is known to lack it."""
+    loaded = st.session_state.get("model_options") or []
+    if not loaded or DEFAULT_MODEL in loaded:
+        return DEFAULT_MODEL
+    return FALLBACK_MODEL if FALLBACK_MODEL in loaded else loaded[0]
+
+
 def _model_choices() -> list[str]:
     """The default first, then recommended models newest first, then the account's other models.
 
@@ -51,44 +61,40 @@ def _model_choices() -> list[str]:
         ordered += [model for model in loaded if model not in RECOMMENDED_MODELS]
     else:
         ordered = list(RECOMMENDED_MODELS)
-    return list(dict.fromkeys([DEFAULT_MODEL, *ordered, OTHER]))
+    return list(dict.fromkeys([default_model(), *ordered, OTHER]))
 
 
 def _label(model: str) -> str:
-    return f"{model} (default)" if model == DEFAULT_MODEL else model
+    return f"{model} (default)" if model == default_model() else model
 
 
-def render_settings() -> tuple[str | None, str]:
-    """Return the learner's API key (None until entered) and model."""
-    typed = (st.session_state.get("api_key_input") or "").strip()
-    with st.expander("OpenAI settings", expanded=not typed):
-        show = st.toggle("Show API key", key="show_api_key")
-        api_key = st.text_input(
-            "OpenAI API key", type="default" if show else "password", key="api_key_input",
-            placeholder="sk-…", autocomplete="off",
-            help="Used only in this browser session to call OpenAI. It is not saved.",
-        ).strip()
-        if api_key:
-            st.caption("Using your key.")
-        else:
-            st.caption("Enter your key to generate outlines, quizzes and answers.")
+def render_key() -> str | None:
+    """The key field, hidden as typed; its eye button shows it. Returns the key, or None until entered."""
+    api_key = st.text_input(
+        "OpenAI API key", type="password", key="api_key_input", placeholder="sk-…", autocomplete="off",
+        help="Used only in this browser session to call OpenAI. It is not saved. The eye button shows or "
+             "hides it.",
+    ).strip()
+    # Load the learner's models once per key they enter.
+    if api_key and st.session_state.get("model_options_for") != _fingerprint(api_key):
+        _load_models(api_key)
+    if api_key and st.session_state.get("model_options_error"):
+        st.error(st.session_state.model_options_error)
+    return api_key or None
 
-        # Load the learner's models once per key they enter.
-        if api_key and st.session_state.get("model_options_for") != _fingerprint(api_key):
-            _load_models(api_key)
-        if api_key and st.session_state.get("model_options_error"):
-            st.error(st.session_state.model_options_error)
 
-        choices = _model_choices()
-        if st.session_state.get("model_choice") not in choices:
-            st.session_state.model_choice = DEFAULT_MODEL
-        choice = st.selectbox(
-            "Model", choices, key="model_choice", format_func=_label,
-            help=f"Newest models are listed first after the default, {DEFAULT_MODEL}. The tutor needs a model "
-                 "that supports tool calls and structured outputs; if a model fails, switch back to the default.",
-        )
-        model = choice
-        if choice == OTHER:
-            model = st.text_input("Model ID", key="model_other", placeholder="for example gpt-5.6-luna").strip()
-            model = model or DEFAULT_MODEL
-    return api_key or None, model
+def render_model() -> str:
+    """The model picker; with Other…, a field for any model ID."""
+    choices = _model_choices()
+    if st.session_state.get("model_choice") not in choices:
+        st.session_state.model_choice = choices[0]
+    choice = st.selectbox(
+        "Model", choices, key="model_choice", format_func=_label,
+        help=f"The default is {DEFAULT_MODEL} ({FALLBACK_MODEL} when your account does not have it); newer "
+             "models follow. The tutor needs a model that supports tool calls and structured outputs; if a "
+             "model fails, switch back to the default.",
+    )
+    if choice != OTHER:
+        return choice
+    model = st.text_input("Model ID", key="model_other", placeholder="for example gpt-5.6-luna").strip()
+    return model or default_model()

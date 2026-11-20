@@ -71,10 +71,11 @@ class PdfPreviewTests(unittest.TestCase):
 
     def test_navigation_and_upload_replacement(self):
         app = AppTest.from_file(str(APP)).run()
-        self.assertEqual(app.sidebar.file_uploader[0].label, "Upload a PDF")
-        self.assertFalse(app.main.file_uploader)
+        # The upload is in the bar at the top of the page; there is no sidebar.
+        self.assertEqual(app.main.container("topbar").file_uploader[0].label, "PDF to study")
+        self.assertFalse(app.sidebar.children)
         first = make_pdf("First page", "", "Third page")
-        app.sidebar.file_uploader[0].set_value(("lecture.pdf", first, "application/pdf")).run()
+        app.file_uploader[0].set_value(("lecture.pdf", first, "application/pdf")).run()
         self.assertEqual(previewed_pdf(app), (first, [1]))
         text_panel = app.main.container("extracted_text_panel")
         self.assertGreater(text_panel.proto.height_config.pixel_height, 0)
@@ -105,6 +106,6 @@ class PdfPreviewTests(unittest.TestCase):
         self.assertFalse(app.get("component_instance"))
         app.file_uploader[0].clear().run()
         self.assertFalse(app.error)
-        self.assertFalse(app.main.selectbox)
+        self.assertNotIn("pdf_page_number", [box.key for box in app.selectbox])
         self.assertFalse(app.get("component_instance"))
         self.assertFalse(app.exception)

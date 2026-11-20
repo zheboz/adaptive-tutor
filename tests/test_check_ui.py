@@ -218,10 +218,16 @@ class KnowledgeCardUITests(CheckUITests):
 
     def test_a_failed_card_waits_for_try_again(self):
         self.app.session_state["day_cards"] = {}
-        with patch("tutor.materials.cards.build_card",
-                   side_effect=[LLMError("Could not reach OpenAI."),
-                                UnitCard((KnowledgePoint("Next day", "Ready.", (), "p2", "x = x + 1"),)),
-                                UnitCard((KnowledgePoint("Again", "Works now.", (), "p1", "x = 2"),))]) as build:
+        failures = [LLMError("Could not reach OpenAI.")]
+
+        def build_card(title, *_):
+            # Today's and the next day's cards are made in parallel, so answer by unit, not call order.
+            if title == "Assignment" and failures:
+                raise failures.pop()
+            return UnitCard((KnowledgePoint("Again" if title == "Assignment" else "Next day", "Works now.", (),
+                                            "p1", "x = 2"),))
+
+        with patch("tutor.materials.cards.build_card", side_effect=build_card) as build:
             self.app.run()
             self.assertIn("The knowledge points could not be prepared. Could not reach OpenAI.",
                           [w.value for w in self.panel().warning])
