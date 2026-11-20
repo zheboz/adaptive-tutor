@@ -9,7 +9,7 @@ import streamlit as st
 from tutor.materials.ingest import PdfPage
 from tutor.materials.outline import Outline
 from tutor.planning import StudyDay, StudyUnit
-from tutor.ui import check, learner, navigation, quiz
+from tutor.ui import cards, check, learner, navigation, quiz
 from tutor.ui.citations import render_sources
 
 
@@ -72,13 +72,19 @@ def render_today(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> None:
     if day > len(days):
         st.info("Optional review day. Choose an earlier day to revisit its reading or repeat a study task.")
         return
-    for assignment in days[day - 1].assignments:
+    # Today's cards first, then the next day's and today's check questions, all in the background.
+    cards.prefetch(days[day - 1], pages)
+    if day < len(days):
+        cards.prefetch(days[day], pages)
+    check.prefetch_questions(units, pages, day)
+    for index, assignment in enumerate(days[day - 1].assignments):
         unit = assignment.unit
-        task = ""
-        if assignment.kind != "read":
-            task = f"<p><strong>Study task</strong><br>{escape(unit.activity)}</p>"
         st.html(f"<p><strong>{assignment.kind.capitalize()} · {escape(unit.title)}</strong>"
-                f"<br>{escape(unit.objective)}</p>{task}")
+                f"<br>{escape(unit.objective)}</p>")
+        cards.render_card(assignment, pages, f"card_{day}_{index}")
+        if assignment.kind != "read":
+            st.html(f"<p><strong>Study task</strong><br>{escape(unit.activity)}</p>")
+        st.caption("All pages for this unit:")
         render_sources(assignment.source_ids, f"plan_citation_{day}_{unit.unit_id}")
     check.render_daily_check_button(day)
 

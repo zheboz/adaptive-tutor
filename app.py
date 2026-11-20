@@ -5,7 +5,7 @@ from tutor import llm
 from tutor.llm import LLMError
 from tutor.materials import outline
 from tutor.materials.ingest import PdfInputError, PdfPage, read_pdf_pages
-from tutor.ui import check, learner, navigation, quiz, settings, tutor_chat, units, views
+from tutor.ui import cards, check, learner, navigation, quiz, settings, tutor_chat, units, views
 from tutor.ui.reader import READER_PANEL_HEIGHT, render_extracted_text, render_pdf_preview
 
 
@@ -14,7 +14,7 @@ def reset_preview() -> None:
         "pdf_pages", "pdf_page_number", "study_outline", "outline_error",
         "study_plan", "study_target_days", "planned_days", "passage_index",
         "learner_state", "planned_weak", "qa_session",
-        *units.UNIT_KEYS, *check.CHECK_KEYS, *quiz.QUIZ_KEYS, *navigation.NAVIGATION_KEYS,
+        *units.UNIT_KEYS, *cards.CARD_KEYS, *check.CHECK_KEYS, *quiz.QUIZ_KEYS, *navigation.NAVIGATION_KEYS,
     ):
         st.session_state.pop(key, None)
     learner.clear_weak_topics()

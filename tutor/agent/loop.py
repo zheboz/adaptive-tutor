@@ -18,11 +18,17 @@ from tutor.planning import StudyUnit
 from .bank import DiagnosticQuestion
 from .state import LearnerState
 from .tools import (
-    CheckConfig, Diagnosis, fallback_diagnosis, initial_config, to_diagnosis, tool_schemas, validate_finish,
+    CheckConfig, Diagnosis, UnitTally, fallback_diagnosis, initial_config, tally, to_diagnosis, tool_schemas,
+    validate_finish,
 )
 
 
-MAX_MODEL_CALLS = 12
+# Model calls besides one per question: the first state lookup, the conclusion, and a few retries.
+EXTRA_MODEL_CALLS = 7
+
+
+def max_model_calls(config: CheckConfig) -> int:
+    return config.max_questions + EXTRA_MODEL_CALLS
 
 _COMMON = """You are a tutor checking which study unit is the learner's main difficulty.
 You have at most {max_questions} questions. The units come from the learner's own uploaded material,
@@ -52,16 +58,23 @@ time. next_step: review_gap when a unit needs extra time; continue when no gap w
 
 _DAILY = """
 This is the check after study day {day}. The learner has just studied the units listed in studied_today.
-Ask questions only about those units; each question comes from the pages studied that day. Earlier
-units cannot be asked about, but their earlier answers are in the state: when they show that today's
-difficulty comes from an earlier unit, name it. next_step: continue when today's material is
+Ask questions only about those units; each question comes from the pages studied that day.
+Each unit gets at most {per_unit} questions in this check, and its answers in this check settle it:
+2 right and none wrong means understood; 2 wrong that outnumber the right ones means a gap; after one
+right and one wrong, a third question decides. Once a unit is settled, no more questions are asked
+about it; this_check in the state shows each unit's tally and whether you can ask more. Try to settle
+every unit studied today, spending the questions where the evidence is least clear, and finish early
+when every unit is settled.
+Earlier units cannot be asked about, but their earlier answers are in the state: when they show that
+today's difficulty comes from an earlier unit, name it. next_step: continue when today's material is
 understood; review_today when a unit studied today needs another session; revisit_earlier when the
-difficulty comes from an earlier unit, named in primary_gap. A review day is added to the plan only
-when at least 2 answers in this check are wrong and they outnumber the right ones."""
+difficulty comes from an earlier unit, named in primary_gap. A review day is added at the end of the
+plan for each unit studied today that ends this check as a gap, and for the earlier unit you name
+with revisit_earlier."""
 
 
 def instructions(config: CheckConfig) -> str:
-    extra = _INITIAL if config.mode == "initial" else _DAILY.format(day=config.day)
+    extra = _INITIAL if config.mode == "initial" else _DAILY.format(day=config.day, per_unit=config.per_unit)
     return _COMMON.format(max_questions=config.max_questions) + extra
 
 
@@ -160,9 +173,12 @@ def _run_tool(session: Session, call: ToolCall) -> dict[str, Any] | Ask | Done:
         summary = session.state.summary()
         summary["units"] = [unit for unit in summary["units"] if unit["unit_id"] in session.config.scope]
         used = _used(session)
+        tallies = tally(session.state, session.asked)
         for unit in summary["units"]:
             # None means the unit's questions have not been prepared yet.
             unit["unused_questions"] = session.bank.remaining(unit["unit_id"], used)
+            if session.config.per_unit and unit["unit_id"] in session.config.askable:
+                unit["this_check"] = tallies.get(unit["unit_id"], UnitTally()).as_dict(session.config.per_unit)
         _span("tool:get_learner_state", start)
         return {**summary, "questions_asked": len(session.asked),
                 "questions_left": session.config.max_questions - len(session.asked)}
@@ -175,6 +191,13 @@ def _run_tool(session: Session, call: ToolCall) -> dict[str, Any] | Ask | Done:
         if unit_id not in session.config.askable:
             _span("tool:ask_question", start, str(unit_id), "unknown unit")
             return {"error": f"Unknown unit {unit_id!r}."}
+        if session.config.per_unit:
+            unit_tally = tally(session.state, session.asked).get(unit_id, UnitTally())
+            verdict = unit_tally.verdict(session.config.per_unit)
+            if verdict != "open":
+                _span("tool:ask_question", start, unit_id, f"settled: {verdict}")
+                return {"error": f"{unit_id} is settled in this check ({verdict}: {unit_tally.right} right, "
+                                 f"{unit_tally.wrong} wrong). Ask about another unit or finish."}
         try:
             question = session.bank.pick(unit_id, _used(session))
         except LLMError as error:
@@ -191,7 +214,7 @@ def _run_tool(session: Session, call: ToolCall) -> dict[str, Any] | Ask | Done:
         return Ask(question, reason, len(session.asked))
 
     if call.name == "finish":
-        problem = validate_finish(args, session.state, session.config)
+        problem = validate_finish(args, session.state, session.config, session.asked)
         if problem:
             _span("tool:finish", start, str(args.get("primary_gap")), problem)
             return {"error": problem}
@@ -211,6 +234,10 @@ def _record_answer(session: Session, choice: int) -> None:
     correct = choice == question.correct_index
     session.state.record(pending.question.id, pending.question.unit_id, question.kind, correct, "diagnosis",
                          question.prompt)
+    extra: dict[str, Any] = {}
+    if session.config.per_unit:
+        unit_tally = tally(session.state, session.asked).get(pending.question.unit_id, UnitTally())
+        extra["unit_this_check"] = unit_tally.as_dict(session.config.per_unit)
     session.items.append(_output(pending.call_id, {
         "question_id": pending.question.id,
         "unit_id": pending.question.unit_id,
@@ -221,6 +248,7 @@ def _record_answer(session: Session, choice: int) -> None:
         "unit_status_now": session.state.status(pending.question.unit_id),
         "unused_questions_on_this_unit": session.bank.remaining(pending.question.unit_id, _used(session)),
         "questions_left": session.config.max_questions - len(session.asked),
+        **extra,
     }))
     session.pending = None
 
@@ -236,7 +264,7 @@ def advance(session: Session, answer: int | None = None) -> Ask | Done:
                 return Ask(pending.question, pending.reason, len(session.asked))
             _record_answer(session, answer)
 
-        while session.model_calls < MAX_MODEL_CALLS:
+        while session.model_calls < max_model_calls(session.config):
             session.model_calls += 1
             turn = call_with_tools(instructions=instructions(session.config), items=session.items, tools=session.tools)
             session.items.extend(turn.items)

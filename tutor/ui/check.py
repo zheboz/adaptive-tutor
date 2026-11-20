@@ -1,7 +1,8 @@
 """The daily check in the plan panel: after studying a day, the learner asks to be checked.
 
-Questions are prepared from that day's pages only. When none can be made, the panel says why;
-otherwise the ReAct agent asks up to three of them and the rest of the plan is adjusted. Each answer
+Questions are prepared from that day's pages only, in the background as soon as the day is opened.
+When none can be made, the panel says why; otherwise the ReAct agent asks up to eight of them, at most
+three per unit, until each unit is settled, and the rest of the plan is adjusted. Each answer
 is submitted in the main script run so a spinner can show while the tutor chooses the next step,
 and feedback on it appears before the next question.
 """
@@ -14,7 +15,7 @@ import streamlit as st
 from tutor.agent.bank import QuestionBank
 from tutor.agent.loop import Ask, Done, advance, start_session
 from tutor.agent.replan import PlanChange, after_daily_check
-from tutor.agent.tools import daily_config
+from tutor.agent.tools import UnitTally, daily_config, tally
 from tutor.llm import LLMError, Trace, tracing
 from tutor.materials.ingest import PdfPage
 from tutor.planning import StudyDay, StudyUnit
@@ -39,6 +40,13 @@ def day_bank(units: Sequence[StudyUnit], pages: Sequence[PdfPage], day: StudyDay
         prefix = "-".join(f"{a.kind}{a.round}-{'.'.join(a.source_ids)}" for a in day.assignments)
         banks[key] = QuestionBank(units, pages, day.assignments, prefix=f"{prefix}:")
     return banks[key]
+
+
+def prefetch_questions(units: Sequence[StudyUnit], pages: Sequence[PdfPage], day: int) -> None:
+    """Start making the day's check questions in the background, so the check need not wait."""
+    plan = st.session_state.study_plan
+    bank = day_bank(units, pages, plan[day - 1])
+    bank.prefetch(dict.fromkeys(assignment.unit.unit_id for assignment in plan[day - 1].assignments))
 
 
 def completed_days() -> set[int]:
@@ -137,8 +145,10 @@ def render_daily_check_button(day: int) -> None:
     checked = day in completed_days()
     st.button("Check my understanding" if not checked else "Check again", key=f"daily_check_{day}",
               on_click=start_daily_check, args=(day,))
-    st.caption("When you have studied today's material, the tutor asks up to 3 questions from today's "
-               "pages, shows the answers with their sources, and adjusts the rest of the plan.")
+    st.caption("When you have studied today's material, the tutor asks up to 8 questions from today's "
+               "pages, at most 3 per unit, until it is clear whether you understood each unit. It shows "
+               "the answers with their sources and adds a review at the end of the plan for any unit "
+               "you have not understood yet.")
 
 
 def _evidence_line(check: dict[str, Any]) -> str:
@@ -231,6 +241,16 @@ def render_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> bool:
     evidence = _evidence_line(check)
     if evidence:
         st.caption(f"Based on: {evidence}")
+    tallies = tally(session.state, session.asked)
+    verdicts = {"understood": "understood", "gap": "needs review", "mixed": "mixed answers",
+                "open": "not settled"}
+    for unit_id in session.config.today:
+        unit_tally = tallies.get(unit_id, UnitTally())
+        if unit_tally.answered:
+            st.caption(f"{titles[unit_id]}: {verdicts[unit_tally.verdict(session.config.per_unit)]} "
+                       f"({unit_tally.right} of {unit_tally.answered} correct)")
+        else:
+            st.caption(f"{titles[unit_id]}: not asked in this check")
     change = check["change"]
     if change is not None and change.changed:
         st.info(f"Plan change · {change.message}")

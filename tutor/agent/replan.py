@@ -10,12 +10,7 @@ from dataclasses import dataclass
 from tutor.planning import StudyDay, insert_review
 
 from .state import LearnerState
-from .tools import Diagnosis
-
-
-# A check adds a review day only when at least this many of its own answers are wrong, and they
-# outnumber the right ones: the same standard as a likely gap (2 of 2, 2 of 3, 3 of 3).
-REVIEW_MIN_WRONG = 2
+from .tools import SETTLING_ANSWERS, Diagnosis, UnitTally, tally
 
 
 @dataclass(frozen=True)
@@ -27,7 +22,10 @@ class PlanChange:
     changed: bool = True
 
 
-def _answers_text(state: LearnerState, unit_id: str) -> str:
+def _answers_text(state: LearnerState, unit_id: str, asked: Sequence[str]) -> str:
+    unit_tally = tally(state, asked).get(unit_id)
+    if unit_tally is not None:
+        return f"{unit_tally.right} of {unit_tally.answered} correct in this check"
     answers = state.units[unit_id].answers
     right = sum(answer.correct for answer in answers)
     return f"{right} of {len(answers)} answers correct" if answers else "no answers yet"
@@ -36,46 +34,49 @@ def _answers_text(state: LearnerState, unit_id: str) -> str:
 def after_daily_check(
     state: LearnerState, diagnosis: Diagnosis, days: Sequence[StudyDay], day: int, asked: Sequence[str] = (),
 ) -> tuple[tuple[StudyDay, ...], PlanChange | None]:
-    """Add a review day at the end of the plan when the check calls for one.
+    """Add review days at the end of the plan when the check calls for them.
 
-    `asked` are the questions of this check. Unless at least REVIEW_MIN_WRONG of them are wrong and
-    the wrong ones outnumber the right ones, no review is added, whatever the tutor concluded.
+    `asked` are the questions of this check. A review is added for each unit studied today that
+    ended this check as a gap (at least 2 wrong answers that outnumber the right ones), and for the
+    earlier unit the tutor named with revisit_earlier. Without a gap today, nothing is added,
+    whatever the tutor concluded.
     """
     days = tuple(days)
     if diagnosis.primary_gap:
         state.flag(diagnosis.primary_gap)
-    if diagnosis.next_step == "continue":
-        return days, None
-
-    today = [a.unit for a in days[day - 1].assignments]
-    if diagnosis.primary_gap:
-        unit = state.units[diagnosis.primary_gap].unit
-    else:
-        # No unit named: review the weakest unit studied today.
-        rank = {"gap": 0, "uncertain": 1, "suspected": 2, "untested": 3, "mastered": 4}
-        unit = min(today, key=lambda u: rank[state.status(u.unit_id)])
     trigger = f"Day {day} check"
-    answers = [state.answer(question_id) for question_id in asked]
-    wrong = sum(answer is not None and not answer.correct for answer in answers)
-    right = sum(answer is not None and answer.correct for answer in answers)
-    if wrong < REVIEW_MIN_WRONG or wrong <= right:
+    today = tuple(dict.fromkeys(a.unit.unit_id for a in days[day - 1].assignments))
+    tallies = tally(state, asked)
+    gaps = [unit_id for unit_id in today if tallies.get(unit_id, UnitTally()).verdict() == "gap"]
+    if not gaps:
+        if diagnosis.next_step == "continue":
+            return days, None
         return days, PlanChange(
-            trigger, f"No review was added: {wrong} of {len(asked)} answers in this check were wrong. A "
-                     f"review is added when at least {REVIEW_MIN_WRONG} answers are wrong and they outnumber "
-                     "the right ones.",
+            trigger, "No review was added: no unit studied today ended this check as a gap. A review is "
+                     f"added when a unit has at least {SETTLING_ANSWERS} wrong answers in a check and they "
+                     "outnumber the right ones.",
             diagnosis.evidence, changed=False,
         )
-    planned = [d.number for d in days[day:]
-               if any(a.unit.unit_id == unit.unit_id and a.kind == "review" for a in d.assignments)]
-    if planned:
-        return days, PlanChange(trigger, f"A review of {unit.title} is already planned for day {planned[0]}, "
-                                         "so no day was added.", diagnosis.evidence, changed=False)
 
-    updated = insert_review(days, len(days), unit)
-    if diagnosis.next_step == "revisit_earlier":
-        why = "your answers suggest today's difficulty comes from this earlier unit"
-    else:
-        why = "today's answers show it needs another session"
-    message = (f"Added a review of {unit.title} as day {len(updated)}, at the end of the plan: {why} "
-               f"({_answers_text(state, unit.unit_id)}).")
+    earlier = diagnosis.primary_gap if (diagnosis.next_step == "revisit_earlier"
+                                        and diagnosis.primary_gap not in (None, *today)) else None
+    added, skipped = [], []
+    updated = days
+    for unit_id in ([earlier] if earlier else []) + gaps:
+        unit = state.units[unit_id].unit
+        planned = [d.number for d in updated[day:]
+                   if any(a.unit.unit_id == unit_id and a.kind == "review" for a in d.assignments)]
+        if planned:
+            skipped.append(f"a review of {unit.title} is already planned for day {planned[0]}")
+            continue
+        updated = insert_review(updated, len(updated), unit)
+        why = ("your answers suggest today's difficulty comes from this earlier unit" if unit_id == earlier
+               else "today's answers show it needs another session")
+        added.append(f"{unit.title} as day {len(updated)} ({why}; {_answers_text(state, unit_id, asked)})")
+    if not added:
+        return days, PlanChange(trigger, "No day was added: " + "; ".join(skipped) + ".",
+                                diagnosis.evidence, changed=False)
+    message = "Added a review of " + "; and of ".join(added) + ", at the end of the plan."
+    if skipped:
+        message += " Not added again: " + "; ".join(skipped) + "."
     return updated, PlanChange(trigger, message, diagnosis.evidence)

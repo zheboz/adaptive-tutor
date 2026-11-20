@@ -9,6 +9,7 @@ from tests.test_pdf_preview import APP, button
 from tests.test_planning_ui import create_plan, metrics, open_day, show_view, visible_text
 from tutor.assessment.questions import InsufficientEvidence, PracticeError, Question
 from tutor.llm import LLMError
+from tutor.materials.cards import KnowledgePoint, UnitCard
 from tutor.materials.outline import Outline, Topic
 from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
 
@@ -47,6 +48,8 @@ class CheckUITests(unittest.TestCase):
             patch("tutor.assessment.questions.generate_questions", side_effect=three_questions))
         self.model = ScriptedModel()
         self.enterContext(patch("tutor.agent.loop.call_with_tools", side_effect=self.model))
+        self.enterContext(patch("tutor.materials.cards.build_card", side_effect=lambda title, *_: UnitCard((
+            KnowledgePoint(f"{title} rule", "What it does.", ("A detail.",), "p1", "x = 2"),))))
         self.app = AppTest.from_file(APP, default_timeout=10).run()
         upload(self.app, "Assignment: x = 2.", "Updates: x = x + 1.", "Loops: range(3).")
         create_plan(self.app, 3)
@@ -60,6 +63,11 @@ class CheckUITests(unittest.TestCase):
                  for item in group]
         return "\n".join([visible_text(panel), *extra])
 
+    def questions_fail(self, error):
+        """Today's questions were prepared when the day opened; prepare them again, failing."""
+        self.generate.side_effect = error
+        self.app.session_state["day_banks"] = {}
+
     def answer(self, question_id, option):
         self.app.radio(key=f"check_choice_{question_id}").set_value(option)
         button(self.panel(), "Submit answer").click().run()
@@ -69,8 +77,9 @@ class CheckUITests(unittest.TestCase):
         labels = [b.label for b in self.panel().button]
         self.assertNotIn("Generate daily practice", labels)
         self.assertIn("Check my understanding", labels)
-        self.assertIn("asks up to 3 questions from today's pages", self.text())
-        self.generate.assert_not_called()
+        self.assertIn("asks up to 8 questions from today's pages, at most 3 per unit", self.text())
+        # Opening the day starts preparing its questions in the background.
+        self.assertEqual(len(self.app.session_state["day_banks"]), 1)
 
     def test_daily_checks_ask_from_the_days_pages_and_adjust_the_plan(self):
         show_view(self.app, "Plan")
@@ -115,7 +124,8 @@ class CheckUITests(unittest.TestCase):
         self.answer(qid("unit-2", 2), "2")
         self.answer(qid("unit-2", 3), "2")
         text = self.text()
-        self.assertIn("No review was added: 1 of 3 answers in this check were wrong", text)
+        self.assertIn("No review was added: no unit studied today ended this check as a gap", text)
+        self.assertIn("Updates: mixed answers (2 of 3 correct)", text)
         self.assertNotIn("Plan change", text)
         button(self.panel(), "Continue").click().run()
         self.assertIn("2 of 3 days checked", self.text())
@@ -134,7 +144,9 @@ class CheckUITests(unittest.TestCase):
         for n, option in ((1, "4"), (2, "2"), (3, "4")):
             self.answer(qid("unit-3", n), option)
         text = self.text()
-        self.assertIn("Added a review of Loops as day 4, at the end of the plan", text)
+        self.assertIn("Added a review of Loops as day 4 (today's answers show it needs another session; "
+                      "1 of 3 correct in this check), at the end of the plan.", text)
+        self.assertIn("Loops: needs review (1 of 3 correct)", text)
         self.assertIn("Your answers in this check (3)", [e.label for e in self.panel().expander])
         button(self.panel(), "Continue").click().run()
         self.assertIn("3 of 4 days checked", self.text())
@@ -151,7 +163,7 @@ class CheckUITests(unittest.TestCase):
         self.assertEqual(self.app.segmented_control(key="day_picker").options, ["1 ✓", "2 ✓", "3 ✓", "4 ↻"])
 
     def test_a_day_with_nothing_to_ask_says_why(self):
-        self.generate.side_effect = InsufficientEvidence("The assigned pages have no teaching point to assess.")
+        self.questions_fail(InsufficientEvidence("The assigned pages have no teaching point to assess."))
         button(self.panel(), "Check my understanding").click().run()
         text = self.text()
         self.assertIn("There is nothing to check from today's material. When you continue, the day is "
@@ -164,8 +176,8 @@ class CheckUITests(unittest.TestCase):
         self.assertIn("1 of 3 days checked", self.text())
 
     def test_questions_that_fail_verification_can_be_prepared_again(self):
-        self.generate.side_effect = PracticeError("A question referenced a learning point that is not in the "
-                                                  "assigned reading.")
+        self.questions_fail(PracticeError("A question referenced a learning point that is not in the "
+                                          "assigned reading."))
         button(self.panel(), "Check my understanding").click().run()
         text = self.text()
         self.assertIn("No question could be prepared from today's material this time.", text)
@@ -176,7 +188,7 @@ class CheckUITests(unittest.TestCase):
         self.assertIn("Why this question: Now there are questions.", self.text())
 
     def test_an_outage_can_be_retried_or_the_check_stopped(self):
-        self.generate.side_effect = LLMError("Could not reach OpenAI.")
+        self.questions_fail(LLMError("Could not reach OpenAI."))
         button(self.panel(), "Check my understanding").click().run()
         self.assertIn("Could not reach OpenAI.", self.text())
         self.generate.side_effect = three_questions
@@ -186,3 +198,42 @@ class CheckUITests(unittest.TestCase):
         button(self.panel(), "Stop check").click().run()
         self.assertNotIn("check", self.app.session_state)
         self.assertIn("Day 1", [s.value for s in self.panel().subheader])
+
+
+class KnowledgeCardUITests(CheckUITests):
+    """The Today view lists each unit's knowledge points before the check."""
+
+    def test_each_unit_lists_its_knowledge_points_with_their_page(self):
+        panel = self.panel()
+        self.assertIn("<strong>1. Assignment rule</strong><br>What it does.", "\n".join(h.value for h in panel.html))
+        self.assertIn("<li>A detail.</li>", "\n".join(h.value for h in panel.html))
+        self.assertIn("From page 1", [e.label for e in panel.expander])
+        self.assertIn("“x = 2”", [c.value for c in panel.caption])
+        panel.button(key="card_1_0_point_1_p1").click().run()
+        self.assertEqual(self.app.selectbox(key="pdf_page_number").value, 1)
+        # The next day's cards were started in the background; opening it shows them.
+        self.assertEqual(len(self.app.session_state["day_cards"]), 2)
+        open_day(self.app, 2)
+        self.assertIn("<strong>1. Updates rule</strong>", "\n".join(h.value for h in self.panel().html))
+
+    def test_a_failed_card_waits_for_try_again(self):
+        self.app.session_state["day_cards"] = {}
+        with patch("tutor.materials.cards.build_card",
+                   side_effect=[LLMError("Could not reach OpenAI."),
+                                UnitCard((KnowledgePoint("Next day", "Ready.", (), "p2", "x = x + 1"),)),
+                                UnitCard((KnowledgePoint("Again", "Works now.", (), "p1", "x = 2"),))]) as build:
+            self.app.run()
+            self.assertIn("The knowledge points could not be prepared. Could not reach OpenAI.",
+                          [w.value for w in self.panel().warning])
+            show_view(self.app, "Plan")
+            show_view(self.app, "Today")
+            self.assertEqual(build.call_count, 2)  # today's failure, and the next day in the background
+            button(self.panel(), "Try again").click().run()
+        self.assertIn("<strong>1. Again</strong><br>Works now.", "\n".join(h.value for h in self.panel().html))
+
+    # The check tests run once, in CheckUITests.
+    test_the_day_shows_no_practice_only_a_check = None
+    test_daily_checks_ask_from_the_days_pages_and_adjust_the_plan = None
+    test_a_day_with_nothing_to_ask_says_why = None
+    test_questions_that_fail_verification_can_be_prepared_again = None
+    test_an_outage_can_be_retried_or_the_check_stopped = None
