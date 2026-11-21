@@ -1,0 +1,50 @@
+{
+  "units": [
+    {"unit_id": "unit-1", "title": "The agent loop and its guards",
+     "objective": "Trace the observe-reason-act loop and name the guard for each way it fails.",
+     "source_ids": ["p8", "p19", "p20", "p21"], "activity": "Trace run_agent for a task that needs two tool calls."},
+    {"unit_id": "unit-2", "title": "Tool definitions and JSON Schema",
+     "objective": "Write a tool's name, description and input schema with constraints that prevent mistakes.",
+     "source_ids": ["p27", "p28", "p29", "p30", "p31"], "activity": "Write the schema for get_weather with bounds and an enum."},
+    {"unit_id": "unit-3", "title": "Structured outputs and argument validation",
+     "objective": "Choose a level of structure and validate tool arguments with Pydantic before running a tool.",
+     "source_ids": ["p35", "p36", "p37", "p38"], "activity": "Generate WeatherArgs' schema and validate a bad call."},
+    {"unit_id": "unit-4", "title": "Errors and retries",
+     "objective": "Decide which failures code retries and which go back to the model, and write errors for the model.",
+     "source_ids": ["p47", "p48", "p49", "p50", "p52"], "activity": "Add backoff to http_get and an actionable ToolError."}
+  ],
+  "questions": {
+    "unit-1": [
+      {"source": "p8", "prompt": "In the lecture's agent loop, what does your code do in the Act step?",
+       "options": ["Runs the tool and captures its output or error", "Chooses which tool to call", "Writes the final answer", "Trims the transcript"]},
+      {"source": "p21", "prompt": "Which guard stops an agent that repeats the same tool call again and again?",
+       "options": ["A MAX_STEPS cap and detecting repeated calls", "Trimming or summarizing old turns", "Logging usage per call", "Returning the error text as the tool result"]},
+      {"source": "p20", "prompt": "In run_agent, what tells the loop that the model is done?",
+       "options": ["stop_reason is not \"tool_use\"", "The transcript outgrows the window", "A tool raises an exception", "The tool list is empty"]}
+    ],
+    "unit-2": [
+      {"source": "p27", "prompt": "What part of a tool does the model see?",
+       "options": ["Its name, description and input schema", "The function's source code", "The function's return value before the call", "Only the function name"]},
+      {"source": "p30", "prompt": "Why does the get_weather schema bound latitude with minimum -90 and maximum 90?",
+       "options": ["To catch swapped coordinates such as Seattle's -122 sent as a latitude", "To make the API respond faster", "To make units optional", "To list the cities the tool accepts"]},
+      {"source": "p29", "prompt": "What does an enum such as [\"celsius\", \"fahrenheit\"] do in a tool schema?",
+       "options": ["Limits the field to fixed choices", "Makes the field required", "Sets the field's default", "Bounds a number"]}
+    ],
+    "unit-3": [
+      {"source": "p35", "prompt": "Which level of structure makes the output match your schema?",
+       "options": ["Schema-constrained output, often called strict mode", "Asking for JSON in the prompt", "JSON mode", "Plain text with a format example"]},
+      {"source": "p37", "prompt": "In run_tool, what happens when the arguments fail Pydantic validation?",
+       "options": ["It raises a ToolError whose message goes back to the model", "The agent loop crashes", "The tool runs with the arguments anyway", "The tool is removed from REGISTRY"]},
+      {"source": "p36", "prompt": "What does units: Literal[\"celsius\", \"fahrenheit\"] = \"celsius\" in WeatherArgs produce?",
+       "options": ["An enum with celsius as the default, so units is optional", "A required free-text field", "A number between 0 and 1", "A list of unit strings"]}
+    ],
+    "unit-4": [
+      {"source": "p48", "prompt": "Which failures does your code retry with backoff, without the model seeing them?",
+       "options": ["Timeouts, rate limits and server errors", "Bad arguments such as latitude = -122.33", "Several places with the same name", "A misspelled city"]},
+      {"source": "p47", "prompt": "What should the agent do when get_coordinates finds several places named Springfield?",
+       "options": ["Ask the user which one", "Retry with backoff", "Use the first match without saying so", "Stop the loop"]},
+      {"source": "p52", "prompt": "In the lecture's http_get, what happens when the service returns HTTP 404?",
+       "options": ["raise_for_status() raises at once, without retrying", "It retries three times with backoff", "It sleeps and returns an empty result", "It returns the response JSON"]}
+    ]
+  }
+}

@@ -99,8 +99,13 @@ def _api_key() -> str | None:
     return _active_credentials.get().api_key
 
 
+# Seconds to wait for one request before its single retry. Slow models in the picker (gpt-5 about 26 s,
+# pro models about 50 s) need the long default; a script using only fast models can lower it.
+REQUEST_TIMEOUT = 60.0
+
+
 def _client(api_key: str) -> OpenAI:
-    return OpenAI(api_key=api_key, base_url="https://api.openai.com/v1", timeout=60.0, max_retries=1)
+    return OpenAI(api_key=api_key, base_url="https://api.openai.com/v1", timeout=REQUEST_TIMEOUT, max_retries=1)
 
 
 @contextmanager

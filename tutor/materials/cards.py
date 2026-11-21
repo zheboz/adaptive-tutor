@@ -115,6 +115,11 @@ def _contains(page_words: str, quote_words: str) -> bool:
     return False
 
 
+def quote_on_page(page_text: str, quote: str) -> bool:
+    """Whether the quote's words are on the page in order, allowing interleaved slide columns."""
+    return _contains(_words(page_text), _words(quote))
+
+
 def _clean(text: str) -> str:
     return " ".join(_CONTROL.sub("", _unescape(str(text))).split())
 

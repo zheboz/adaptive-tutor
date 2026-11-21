@@ -66,6 +66,18 @@ class AskTests(unittest.TestCase):
         spans = [span.name for span in self.session.trace.spans]
         self.assertEqual(spans, ["tool:search_material", "tool:answer"])
 
+    def test_accepts_a_sentence_from_one_column_of_an_interleaved_slide(self):
+        # Extracted text reads a two-column slide line by line across both columns.
+        self.session = start_qa([PdfPage(1, "Klarna Air Canada\nIts assistant handled two-thirds of "
+                                            "Its chatbot described a refund\nsupport chats in its first month. "
+                                            "policy that did not exist.")])
+        self.script(
+            turn("read_page", 1, page="p1"),
+            turn("answer", 2, text="Two-thirds.", citations=[
+                {"page": "p1", "quote": "Its assistant handled two-thirds of support chats in its first month"}]),
+        )
+        self.assertEqual(ask(self.session, "How many chats did Klarna's assistant handle?").kind, "answer")
+
     def test_citations_must_be_retrieved_and_verbatim(self):
         model = self.script(
             turn("answer", 1, text="Loops repeat.", citations=[{"page": "p4", "quote": "runs its body 3 times"}]),

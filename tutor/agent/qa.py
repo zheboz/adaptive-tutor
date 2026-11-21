@@ -15,6 +15,7 @@ import unicodedata
 
 from tutor.assessment import retrieval
 from tutor.llm import Span, ToolCall, Trace, call_with_tools, record_span, tracing
+from tutor.materials.cards import quote_on_page
 from tutor.materials.ingest import PdfPage
 
 
@@ -128,7 +129,8 @@ def _check_answer(session: QASession, turn: _Turn, args: dict[str, Any]) -> Repl
             return f"{page} was not retrieved for this question. Search or read it before citing it."
         if len(_normal(quote)) < MIN_QUOTE_CHARS:
             return "Each quote must be a phrase or sentence of the page, not a single word."
-        if _normal(quote) not in _normal(session.pages[page]):
+        # Word order, not exact text: a slide's columns are interleaved line by line in the extracted text.
+        if not quote_on_page(session.pages[page], quote):
             return f"This quote is not on {page}: “{quote}”. Copy the words exactly as they appear."
         citations.append(Citation(page, quote))
     if not citations:
