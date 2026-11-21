@@ -1,4 +1,4 @@
-"""The initial quiz: one question per outline topic, answered all together before the plan exists.
+"""The quick check before the plan exists: one question per outline topic.
 
 Topics the learner checked are quizzed in the order they were checked. With none checked, up to
 three topics spread across the whole outline are quizzed. Each question is built from the topic's

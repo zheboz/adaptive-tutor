@@ -2,12 +2,9 @@ import json
 import unittest
 from unittest.mock import patch
 
-from streamlit.testing.v1 import AppTest
-
 from tests.test_agent_loop import ScriptedModel, turn
-from tests.test_outline_ui import upload
-from tests.test_pdf_preview import APP, button, previewed_pdf
-from tests.test_planning_ui import create_plan
+from tests.test_pdf_preview import previewed_pdf
+from tests.ui_helpers import UITestCase, begin, create_plan, show_panel
 from tutor.agent.qa import MAX_MODEL_CALLS, Citation, ask, start_qa
 from tutor.assessment.retrieval import build_index, search
 from tutor.llm import LLMError
@@ -164,8 +161,9 @@ class AskTests(unittest.TestCase):
         self.assertTrue(all(tool["strict"] for tool in tools.values()))
 
 
-class TutorChatUITests(unittest.TestCase):
+class TutorChatUITests(UITestCase):
     def setUp(self):
+        super().setUp()
         topics = [Topic(title="Updating", summary="Change a value.", source_ids=["p2"]),
                   Topic(title="Loops", summary="Repeat.", source_ids=["p4"])]
         self.enterContext(patch("tutor.materials.outline.generate_outline")).return_value = Outline(topics=topics)
@@ -174,12 +172,12 @@ class TutorChatUITests(unittest.TestCase):
             UnitPlan(steps=[UnitStep(title=t.title, topic_ids=[n]) for n, t in enumerate(topics, 1)]),
             Solution(tasks=[UnitTask(unit_number=n, objective=t.summary, activity="Explain.") for n, t in enumerate(topics, 1)]),
         ]
-        self.app = AppTest.from_file(APP).run()
-        self.document = upload(self.app, *[page.text for page in PAGES])
+        self.app = self.new_app()
+        self.document = begin(self.app, *[page.text for page in PAGES])
 
-    def test_the_tutor_is_available_before_the_outline(self):
-        # Asking needs only the PDF, so the chat is there as soon as a PDF is uploaded.
-        self.assertIn("Ask the tutor", [h.value for h in self.app.main.header])
+    def test_the_tutor_is_available_while_reviewing_the_topics(self):
+        # Asking needs only the PDF, so the chat is offered under the topics, before any plan.
+        self.assertIn("Ask the tutor about this material", [e.label for e in self.app.main.expander])
         model = ScriptedModel(
             turn("search_material", 1, query="range(3)"),
             turn("answer", 2, text="It runs 3 times.", citations=[{"page": "p4", "quote": "runs its body 3 times"}]),
@@ -188,11 +186,20 @@ class TutorChatUITests(unittest.TestCase):
             self.app.chat_input(key="tutor_question").set_value("How often does range(3) loop?").run()
         self.assertFalse(self.app.exception)
         self.assertEqual(json.loads(model.seen[0][-1]["content"])["context"], {"weak_topics": []})
+        panel = self.app.main.container("tutor_chat_panel")
+        self.assertIn("It runs 3 times.", [m.value for m in panel.markdown])
+        # There is no reader during setup, so the cited page opens in a window.
+        panel.button(key="qa_0_p4").click().run()
+        self.assertEqual(previewed_pdf(self.app), (self.document, [4]))
+        # The conversation is kept once studying starts.
+        create_plan(self.app, 2)
+        show_panel(self.app, "Ask the tutor")
         self.assertIn("It runs 3 times.", [m.value for m in self.app.main.container("tutor_chat_panel").markdown])
 
-    def test_chat_answers_with_page_links_and_knows_the_plan(self):
+    def test_beside_the_pdf_chat_answers_with_page_links_and_knows_the_plan(self):
         self.app.checkbox(key="weak_topic_0").check()
         create_plan(self.app, 2)
+        show_panel(self.app, "Ask the tutor")
         model = ScriptedModel(
             turn("search_material", 1, query="x = x + 1"),
             turn("answer", 2, text="It **adds one** to x.", citations=[{"page": "p2", "quote": QUOTE}]),
@@ -209,9 +216,9 @@ class TutorChatUITests(unittest.TestCase):
             panel = self.app.main.container("tutor_chat_panel")
             self.assertIn("It **adds one** to x.", [m.value for m in panel.markdown])
             panel.button(key="qa_0_p2").click().run()
-            # The cited page opens in the PDF; the chat below and the view beside the PDF stay as they were.
+            # The cited page opens in the reader beside the chat; the chat stays open.
             self.assertEqual(previewed_pdf(self.app), (self.document, [2]))
-            self.assertEqual(self.app.segmented_control(key="right_view").value, "Today")
+            self.assertEqual(self.app.segmented_control(key="today_tab").value, "Ask the tutor")
 
             self.app.chat_input(key="tutor_question").set_value("What is recursion?").run()
             panel = self.app.main.container("tutor_chat_panel")

@@ -1,8 +1,10 @@
-"""The learner's own OpenAI key and model, in the bar at the top of the page. The app has no key of
-its own.
+"""The learner's own OpenAI key and model: in the first setup step, then in the settings at the top
+of the page. The app has no key of its own.
 
 The key stays in this browser session only: it is not saved, and never written to the process
-environment shared by every session.
+environment shared by every session. The fields are drawn in different places at different times,
+and Streamlit drops a widget's value while it is not drawn, so their values are also kept in plain
+session keys.
 """
 
 from hashlib import sha256
@@ -22,8 +24,9 @@ RECOMMENDED_MODELS = (
     "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano", "o3", "gpt-4.1", "gpt-4.1-mini", "gpt-4o",
     "gpt-4o-mini",
 )
-SETTINGS_KEYS = ("api_key_input", "model_choice", "model_other", "model_options",
-                 "model_options_for", "model_options_error")
+_FIELDS = ("api_key_input", "model_choice", "model_other")
+_SAVED = "saved_settings"
+SETTINGS_KEYS = (*_FIELDS, _SAVED, "model_options", "model_options_for", "model_options_error")
 
 
 def _fingerprint(api_key: str) -> str:
@@ -66,6 +69,53 @@ def _model_choices() -> list[str]:
 
 def _label(model: str) -> str:
     return f"{model} (default)" if model == default_model() else model
+
+
+def _restore() -> None:
+    saved = st.session_state.get(_SAVED, {})
+    for key in _FIELDS:
+        if key not in st.session_state and key in saved:
+            st.session_state[key] = saved[key]
+
+
+def _save() -> None:
+    saved = st.session_state.setdefault(_SAVED, {})
+    for key in _FIELDS:
+        if key in st.session_state:
+            saved[key] = st.session_state[key]
+
+
+def render_settings(horizontal: bool = False) -> None:
+    """The key and model fields, side by side or one above the other."""
+    _restore()
+    if horizontal:
+        key_column, model_column = st.columns([3, 2], vertical_alignment="top")
+    else:
+        key_column = model_column = st.container()
+    with key_column:
+        render_key()
+    with model_column:
+        render_model()
+    _save()
+
+
+def _value(key: str):
+    """The field's latest value: its widget's, when drawn in the previous run, or the kept one."""
+    if key in st.session_state:
+        return st.session_state[key]
+    return st.session_state.get(_SAVED, {}).get(key)
+
+
+def current_key() -> str | None:
+    """The learner's key, or None until entered."""
+    return (_value("api_key_input") or "").strip() or None
+
+
+def current_model() -> str:
+    choice = _value("model_choice") or default_model()
+    if choice != OTHER:
+        return choice
+    return (_value("model_other") or "").strip() or default_model()
 
 
 def render_key() -> str | None:

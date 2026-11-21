@@ -1,65 +1,18 @@
-import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from streamlit.testing.v1 import AppTest
-
-from tests.test_outline_ui import upload
-from tests.test_pdf_preview import APP, button, previewed_pdf
+from tests.test_pdf_preview import button, previewed_pdf
+from tests.ui_helpers import (
+    UITestCase, begin, create_plan, go_to_step, labels, metrics, open_day, show_page, show_panel, visible_text,
+)
 from tutor.llm import LLMError
 from tutor.materials.outline import Outline, Topic
 from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
 
 
-def finish_quiz(app):
-    """Take the initial quiz with no questions, which leads straight to the plan controls."""
-    show_view(app, "Outline")
-    with patch("tutor.assessment.questions.generate_questions", return_value=()):
-        button(app.main.container("quiz_start"), "Start initial quiz").click().run()
-
-
-def create_plan(app, days):
-    """Create the plan below the quiz results, or change its days in the Plan view."""
-    if "planned_days" in app.session_state:
-        show_view(app, "Plan")
-    elif "quiz" in app.session_state and app.session_state["quiz"]["results"] is not None:
-        show_view(app, "Initial quiz")
-    else:
-        finish_quiz(app)
-    app.number_input(key="study_target_days").set_value(days)
-    button(app, "Create study plan").click().run()
-
-
-def show_view(app, name):
-    app.segmented_control(key="right_view").set_value(name).run()
-
-
-def open_day(app, day):
-    show_view(app, "Today")
-    app.segmented_control(key="day_picker").set_value(day).run()
-
-
-def metrics(app):
-    return {metric.label: metric.value for metric in app.main.metric}
-
-
-def visible_text(app):
-    return "\n".join(
-        item.value
-        for group in (app.subheader, app.text, app.caption, app.html, app.markdown, app.info)
-        for item in group
-    )
-
-
-def document_row(app):
-    return next(
-        block for block in app.main.children.values()
-        if block.type == "flex_container" and block.get("component_instance")
-    )
-
-
-class PlanningUITests(unittest.TestCase):
+class PlanningUITests(UITestCase):
     def setUp(self):
+        super().setUp()
         self.outline = Outline(topics=[
             Topic(title="Update a variable", summary="Assign a new value.", source_ids=["p1"]),
             Topic(title="Trace a loop", summary="Follow each iteration.", source_ids=["p2"]),
@@ -74,69 +27,83 @@ class PlanningUITests(unittest.TestCase):
         ])
         self.model = self.enterContext(patch("tutor.planning.units.generate_structured"))
         self.model.side_effect = [self.plan, self.solution]
-        self.app = AppTest.from_file(APP).run()
+        self.generate = self.enterContext(patch("tutor.materials.outline.generate_outline"))
+        self.generate.return_value = self.outline
+        self.app = self.new_app()
 
-    @patch("tutor.materials.outline.generate_outline")
-    def test_views_beside_the_pdf_follow_the_steps(self, generate):
+    def test_the_plan_step_previews_the_days_before_studying_starts(self):
         app = self.app
-        generate.return_value = self.outline
-        document = upload(app, "Variable updates", "Loop tracing")
-        # The outline is generated on upload, so the learner lands on marking topics.
-        left, right = document_row(app).children.values()
-        self.assertEqual(previewed_pdf(left), (document, [1]))
-        self.assertEqual(app.segmented_control(key="right_view").options, ["Outline"])
-        self.assertIn("Ask the tutor", [h.value for h in app.main.header])
-        self.assertIn("Update a variable", visible_text(right.container("outline_panel")))
-        self.assertIn("**3 · Mark & quiz**", app.main.container("steps").markdown[0].value)
-        # Each column is a single panel of the same height, so the two line up exactly. The page
-        # controls are inside the PDF panel, and the view bar inside the view panel.
-        left_panel, = left.children.values()
-        right_panel, = right.children.values()
-        self.assertEqual((left_panel.key, right_panel.key), ("pdf_preview_panel", "view_panel"))
-        self.assertEqual(left_panel.proto.height_config.pixel_height, right_panel.proto.height_config.pixel_height)
-        self.assertTrue(left_panel.container("pdf_page_controls").button)
-        self.assertEqual(list(right_panel.children.values())[0].key, "right_view")
-        # The extracted text is a collapsed section at the bottom of the page, after Ask the tutor.
-        order = [getattr(block, "label", None) or getattr(block, "value", None)
-                 for block in app.main.children.values()]
-        self.assertTrue(str(order[-1]).startswith("Extracted text"))
-        (extracted,) = [e for e in app.main.expander if e.label.startswith("Extracted text")]
-        self.assertEqual(extracted.label, "Extracted text · page 1")
-        self.assertEqual(app.main.container("extracted_text_panel").code[0].value.strip(), "Variable updates")
+        begin(app, "Variable updates", "Loop tracing")
+        # The units are planned in the background as soon as the outline is ready.
+        self.assertIn("units_started", app.session_state)
+        self.assertFalse(app.number_input)
+        app.button(key="skip_initial_quiz").click().run()
+        self.assertEqual(app.session_state["setup_step"], 4)
+        target = app.number_input(key="study_target_days")
+        self.assertEqual(target.value, 7)
+        self.assertIn("2 learning units over 7 days.", [c.value for c in app.caption])
+        rows = app.dataframe[0].value.to_dict("records")
+        self.assertEqual(len(rows), 7)
+        self.assertEqual(rows[-1]["Study"], "Optional review")
+        # The preview follows the number of days at once, with no model call.
+        target.set_value(2).run()
+        rows = app.dataframe[0].value.to_dict("records")
+        self.assertEqual([r["Study"] for r in rows], ["Study: Read an assignment", "Study: Follow the loop"])
+        self.assertEqual(self.model.call_count, 2)
+        self.assertNotIn("planned_days", app.session_state)
 
+        # Going back and forth keeps the number of days.
+        go_to_step(app, 2)
+        go_to_step(app, 4)
+        self.assertEqual(app.number_input(key="study_target_days").value, 2)
+        app.button(key="start_studying").click().run()
+        self.assertEqual(app.session_state["planned_days"], 2)
+        self.assertEqual(app.segmented_control(key="workspace_page").value, "Today")
+        # Setup is over: the step bar is gone.
+        self.assertNotIn("step_1", [b.key for b in app.button])
+        self.assertFalse(app.exception)
+
+    def test_today_puts_the_reader_beside_the_day(self):
+        app = self.app
+        document = begin(app, "Variable updates", "Loop tracing")
         create_plan(app, 2)
-        left, right = document_row(app).children.values()
-        self.assertEqual(previewed_pdf(left), (document, [1]))
-        self.assertEqual(app.segmented_control(key="right_view").value, "Today")
-        self.assertEqual(app.segmented_control(key="right_view").options, ["Today", "Plan", "Progress"])
-        self.assertIn("Read an assignment", visible_text(right.container("plan_panel")))
-        self.assertIn("**5 · Study**", app.main.container("steps").markdown[0].value)
-        self.assertTrue(app.main.container("plan_panel").proto.height_config.pixel_height > 0)
+        self.assertEqual(app.segmented_control(key="workspace_page").options, ["Today", "Plan", "Progress"])
+        self.assertEqual(app.segmented_control(key="today_tab").options, ["Study", "Ask the tutor"])
+        self.assertEqual(previewed_pdf(app), (document, [1]))
+        reader = app.main.container("pdf_preview_panel")
+        panel = app.main.container("today_panel")
+        self.assertEqual(reader.proto.height_config.pixel_height, panel.proto.height_config.pixel_height)
+        self.assertIn("Read an assignment", visible_text(app.main.container("study_panel")))
 
-        show_view(app, "Plan")
-        button(app.main.container("plan_overview_panel"), "Page 2").click().run()
+        # The reader's own controls, and its Text view of what the tutor reads.
+        self.assertTrue(button(reader, "Previous page").disabled)
+        button(reader, "Next page").click().run()
         self.assertEqual(previewed_pdf(app), (document, [2]))
+        app.segmented_control(key="reader_mode").set_value("Text").run()
+        self.assertFalse(app.get("component_instance"))
         self.assertEqual(app.main.container("extracted_text_panel").code[0].value.strip(), "Loop tracing")
-        self.assertEqual(app.session_state["current_day"], 1)
-        generate.assert_called_once()
+        app.segmented_control(key="reader_mode").set_value("Page").run()
+        app.selectbox(key="pdf_page_number").select(1).run()
+        self.assertEqual(previewed_pdf(app), (document, [1]))
+
+        # Page links beside the reader turn its page; elsewhere they open a window.
+        open_day(app, 2)
+        units = app.session_state["study_units"]
+        app.button(key=f"plan_citation_2_{units[1].unit_id}_p2").click().run()
+        self.assertEqual(previewed_pdf(app), (document, [2]))
+        self.assertEqual(app.segmented_control(key="day_picker").value, 2)
+        show_page(app, "Plan")
+        self.assertFalse(app.get("component_instance"))
+        app.button(key="citation_0_p1").click().run()
+        self.assertEqual(previewed_pdf(app), (document, [1]))
+        self.assertEqual(app.segmented_control(key="workspace_page").value, "Plan")
+        self.generate.assert_called_once()
         self.assertEqual(self.model.call_count, 2)
         self.assertFalse(app.exception)
 
-    @patch("tutor.materials.outline.generate_outline")
-    def test_reschedule_and_follow_a_planned_reading(self, generate):
+    def test_reschedule_and_follow_a_planned_reading(self):
         app = self.app
-        generate.return_value = self.outline
-        document = upload(app, "Variable updates", "Loop tracing")
-        self.assertFalse(app.number_input)
-        # The plan controls appear only after the initial quiz. The units are planned in the
-        # background as soon as the outline is ready, while the learner reads it.
-        self.assertNotIn("study_target_days", [w.key for w in app.number_input])
-        self.assertIn("units_started", app.session_state)
-        finish_quiz(app)
-        target = app.number_input(key="study_target_days")
-        self.assertEqual(target.label, "Target duration (days)")
-        self.assertEqual(target.value, 7)
-
+        begin(app, "Variable updates", "Loop tracing")
         create_plan(app, 5)
         units = app.session_state["study_units"]
         five_days = app.session_state["study_plan"]
@@ -156,12 +123,11 @@ class PlanningUITests(unittest.TestCase):
         practice = visible_text(app)
         self.assertIn("Follow the loop", practice)
         self.assertIn("Trace the loop in the notes.", practice)
-        self.assertNotRegex(practice, r"(?i)\b(?:mins?|minutes?)\b")
-        app.button(key=f"plan_citation_4_{units[1].unit_id}_p2").click().run()
-        self.assertEqual(previewed_pdf(app), (document, [2]))
+        # The open day is kept while the chat is beside the PDF.
+        show_panel(app, "Ask the tutor")
+        show_panel(app, "Study")
         self.assertEqual(app.segmented_control(key="day_picker").value, 4)
-        self.assertEqual(app.session_state["study_plan"], five_days)
-        show_view(app, "Plan")
+        show_page(app, "Plan")
         self.assertEqual(metrics(app)["Goal"], "5 days")
         self.assertEqual(metrics(app)["Plan"], "4 days")
         self.assertEqual([row["Day"] for row in app.dataframe[0].value.to_dict("records")], [1, 2, 3, 4, 5])
@@ -171,6 +137,7 @@ class PlanningUITests(unittest.TestCase):
         self.assertEqual(app.session_state["planned_days"], 10)
         self.assertEqual(app.session_state["study_units"], units)
         self.assertEqual(ten_days, five_days)
+        self.assertEqual(app.segmented_control(key="workspace_page").value, "Today")
         open_day(app, 10)
         self.assertIn("Day 10", [item.value for item in app.subheader])
         self.assertRegex(visible_text(app), r"(?i)\breview\b")
@@ -178,12 +145,11 @@ class PlanningUITests(unittest.TestCase):
         create_plan(app, 2)
         self.assertEqual(app.segmented_control(key="day_picker").value, 1)
         self.assertIn("Find the assigned value.", visible_text(app))
-        generate.assert_called_once()
+        self.generate.assert_called_once()
         self.assertEqual([call.kwargs["schema"] for call in self.model.call_args_list], [UnitPlan, Solution])
         self.assertFalse(app.exception)
 
-    @patch("tutor.materials.outline.generate_outline")
-    def test_replacing_or_removing_a_document_clears_its_plan(self, generate):
+    def test_starting_over_clears_the_material_and_its_plan(self):
         app = self.app
         replacement = Outline(topics=[
             Topic(title="Sort a list", summary="Arrange values in order.", source_ids=["p1"]),
@@ -193,45 +159,44 @@ class PlanningUITests(unittest.TestCase):
             UnitTask(unit_number=1, objective="Recognize sorted order.", activity="Compare two lists."),
         ])
         self.model.side_effect = [self.plan, self.solution, sort_plan, sort_solution]
-        generate.side_effect = [self.outline, replacement]
-        upload(app, "Variable updates", "Loop tracing")
+        self.generate.side_effect = [self.outline, replacement]
+        begin(app, "Variable updates", "Loop tracing")
         create_plan(app, 3)
 
-        upload(app, "Sorting")
+        app.button(key="start_over").click().run()
         self.assert_plan_cleared()
-        finish_quiz(app)
-        self.assertEqual(app.number_input(key="study_target_days").value, 7)
+        self.assertEqual(app.session_state["setup_step"], 1)
+        # The key stays.
+        self.assertEqual(app.text_input(key="api_key_input").value, "sk-test")
+        begin(app, "Sorting")
         create_plan(app, 20)
         self.assertEqual(app.session_state["unit_plan"], sort_plan)
         self.assertEqual([unit.title for unit in app.session_state["study_units"]], ["Order a list"])
         self.assertEqual(len(app.session_state["study_plan"]), 2)
         open_day(app, 20)
         self.assertRegex(visible_text(app), r"(?i)\breview\b")
-        app.file_uploader[0].clear().run()
-        self.assert_plan_cleared()
         self.assertFalse(app.exception)
 
-    @patch("tutor.materials.outline.generate_outline")
-    def test_retry_continues_from_the_last_validated_stage(self, generate):
+    def test_retry_continues_from_the_last_validated_stage(self):
         app = self.app
-        generate.return_value = self.outline
         self.model.side_effect = [
             LLMError("Could not plan units."), self.plan, LLMError("Could not prepare tasks."), self.solution,
         ]
-        upload(app, "Variable updates", "Loop tracing")
+        begin(app, "Variable updates", "Loop tracing")
 
-        # The units are built when the initial quiz starts; each failure can be retried there.
-        finish_quiz(app)
+        # The units are needed when the learner moves past Topics; each failure can be retried there.
+        app.button(key="skip_initial_quiz").click().run()
         self.assertIn("Could not plan units.", [item.value for item in app.error])
         self.assertNotIn("unit_plan", app.session_state)
         self.assertNotIn("quiz", app.session_state)
+        self.assertEqual(app.session_state["setup_step"], 2)
 
-        finish_quiz(app)
+        app.button(key="skip_initial_quiz").click().run()
         self.assertIn("Could not prepare tasks.", [item.value for item in app.error])
         self.assertEqual(app.session_state["unit_plan"], self.plan)
         self.assertNotIn("study_units", app.session_state)
-        self.assertNotIn("quiz", app.session_state)
-        app.selectbox(key="pdf_page_number").select(2).run()
+        go_to_step(app, 1)
+        go_to_step(app, 2)
         self.assertEqual(self.model.call_count, 3)
 
         create_plan(app, 10)
@@ -241,13 +206,11 @@ class PlanningUITests(unittest.TestCase):
         self.assertEqual(len(app.session_state["study_plan"]), 4)
         self.assertEqual([call.kwargs["schema"] for call in self.model.call_args_list],
                          [UnitPlan, UnitPlan, Solution, Solution])
-        generate.assert_called_once()
+        self.generate.assert_called_once()
 
-    @patch("tutor.materials.outline.generate_outline")
-    def test_existing_session_redistributes_legacy_segments_without_model_calls(self, generate):
+    def test_existing_session_redistributes_legacy_segments_without_model_calls(self):
         app = self.app
-        generate.return_value = self.outline
-        upload(app, "Variable updates", "Loop tracing")
+        begin(app, "Variable updates", "Loop tracing")
         create_plan(app, 5)
         units = app.session_state["study_units"]
         expected_days = app.session_state["study_plan"]
@@ -260,10 +223,10 @@ class PlanningUITests(unittest.TestCase):
         self.assertIn("Read an assignment", visible_text(app))
         self.assertNotRegex(visible_text(app), r"(?i)\b(?:mins?|minutes?)\b")
         self.assertEqual(self.model.call_count, 2)
-        generate.assert_called_once()
+        self.generate.assert_called_once()
 
     def assert_plan_cleared(self):
         self.assertFalse(self.app.number_input)
-        self.assertNotIn("Create study plan", [item.label for item in self.app.button])
-        for key in ("unit_plan", "study_units", "study_plan", "planned_days", "study_target_days", "study_day"):
+        self.assertNotIn("Start studying →", labels(self.app))
+        for key in ("pdf_bytes", "unit_plan", "study_units", "study_plan", "planned_days", "draft_days"):
             self.assertNotIn(key, self.app.session_state)

@@ -42,7 +42,7 @@ class StructuredCallTests(unittest.TestCase):
         self.assertEqual(self.parse.call_args.kwargs["model"], "user-selected-model")
 
     def test_missing_key(self):
-        with using(None), self.assertRaisesRegex(LLMError, "top of the page"):
+        with using(None), self.assertRaisesRegex(LLMError, "in the settings"):
             self.request()
         self.sdk.assert_not_called()
 
@@ -134,7 +134,7 @@ class ToolCallTests(unittest.TestCase):
                     self.call()
 
     def test_missing_key_stops_before_a_request(self):
-        with using(None), self.assertRaisesRegex(LLMError, "top of the page"):
+        with using(None), self.assertRaisesRegex(LLMError, "in the settings"):
             self.call()
         self.sdk.assert_not_called()
 
@@ -165,9 +165,9 @@ class CredentialTests(unittest.TestCase):
 
     def test_without_the_learners_key_nothing_is_sent(self):
         for block in (using(None), using("", "gpt-6-luna")):
-            with self.subTest(block=block), block, self.assertRaisesRegex(LLMError, "top of the page"):
+            with self.subTest(block=block), block, self.assertRaisesRegex(LLMError, "in the settings"):
                 self.request()
-        with self.assertRaisesRegex(LLMError, "top of the page"):
+        with self.assertRaisesRegex(LLMError, "in the settings"):
             self.request()
         self.sdk.assert_not_called()
 

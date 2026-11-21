@@ -1,8 +1,9 @@
-"""The initial quiz between the outline and the plan.
+"""The quick check, the third setup step: one question at a time, each answered at once.
 
-The learner checks the topics they don't understand, takes one question per checked topic (or up to
-three across the material), sees every answer with its source, and only then creates the plan, below
-the results. The quiz can be skipped.
+There is one question per topic the learner checked, in the order they checked them, or up to three
+across the material when nothing is checked. Each answer shows whether it was right, the correct
+answer and its source before the next question. The answers are recorded when the last one is in,
+and the plan then gives more time to the topics answered wrong. The check can be skipped.
 """
 
 from collections.abc import Sequence
@@ -16,7 +17,6 @@ from tutor.llm import LLMError
 from tutor.materials.ingest import PdfPage
 from tutor.materials.outline import Outline
 from tutor.planning import StudyUnit
-from tutor.ui import navigation
 from tutor.ui.feedback import render_feedback
 from tutor.ui.learner import learner_state, weak_topics_in_order, weak_unit_ids
 from tutor.ui.units import ensure_units
@@ -38,62 +38,54 @@ def done() -> bool:
     return data is not None and data.get("results") is not None
 
 
+def skipped() -> bool:
+    data = _data()
+    return data is not None and bool(data.get("skipped"))
+
+
 def _build(result: Outline, units: Sequence[StudyUnit], pages: Sequence[PdfPage], topics: list[int]) -> None:
     if "passage_index" not in st.session_state:
         st.session_state.passage_index = retrieval.build_index(pages)
+    data = {"topics": topics, "quiz": None, "answers": [], "revealed": False, "results": None, "error": None}
     count = len(topics)
     try:
         with st.spinner(f"Preparing {count} question{'s' if count != 1 else ''} from your material…"):
-            quiz = build_quiz(result, units, st.session_state.passage_index, topics)
+            data["quiz"] = build_quiz(result, units, st.session_state.passage_index, topics)
     except LLMError as error:
-        st.session_state.quiz = {"topics": topics, "quiz": None, "results": None, "error": str(error)}
-        return
-    # With no question to answer, the quiz is finished at once and the plan controls appear.
-    results = [] if not quiz.items else None
-    st.session_state.quiz = {"topics": topics, "quiz": quiz, "results": results, "error": None}
-    if results is not None:
-        st.session_state.quiz_summary = _summary(quiz, results)
+        data["error"] = str(error)
+    else:
+        # With no question to answer, the check is finished at once.
+        if not data["quiz"].items:
+            data["results"] = []
+            st.session_state.quiz_summary = _summary(data["quiz"], [])
+    st.session_state.quiz = data
 
 
-def _skip() -> None:
-    """Go straight to the plan. Checked topics still get more time; nothing is graded."""
-    st.session_state.quiz = {"topics": [], "quiz": Quiz(items=()), "results": [], "error": None, "skipped": True}
-    st.session_state.quiz_summary = "skipped."
-
-
-def render_start(result: Outline, pages: Sequence[PdfPage]) -> None:
-    """Below the outline, where the learner has just checked topics: start the quiz, or skip it."""
-    if st.session_state.get("planned_days") is not None:
-        return
-    with st.container(border=True, key="quiz_start"):
-        st.markdown("**Initial quiz**")
-        if done():
-            st.caption(f"Done: {st.session_state.get('quiz_summary', '')} "
-                       "Create the plan in the Initial quiz view.")
-            return
-        if started():
-            st.caption("Answer the questions in the Initial quiz view.")
-            return
-        checked = weak_topics_in_order()
-        if checked:
-            st.caption(f"One question for each topic you checked ({len(checked)}), in the order you checked them.")
-        else:
-            st.caption("No topic checked: the quiz asks up to 3 questions from across the material.")
-        with st.container(horizontal=True):
-            start = st.button("Start initial quiz", key="start_initial_quiz", type="primary")
-            skip = st.button("Skip the quiz", key="skip_initial_quiz",
-                             help="Go straight to the plan. Topics you checked still get more time.")
-    if start or skip:
-        units = ensure_units(result)
-        if units is None:
-            return
+def _ready_units(result: Outline) -> Sequence[StudyUnit] | None:
+    """The units, with the checked topics recorded as the learner's report; None after an error."""
+    units = ensure_units(result)
+    if units is not None:
         learner_state(units).apply_report(weak_unit_ids(units))
-        if start:
-            _build(result, units, pages, choose_topics(len(result.topics), checked))
-        else:
-            _skip()
-        navigation.show_view("Initial quiz")
-        st.rerun()
+    return units
+
+
+def start(result: Outline, pages: Sequence[PdfPage]) -> bool:
+    """Prepare the questions for the checked topics. False when the units could not be planned."""
+    units = _ready_units(result)
+    if units is None:
+        return False
+    _build(result, units, pages, choose_topics(len(result.topics), weak_topics_in_order()))
+    return True
+
+
+def skip(result: Outline) -> bool:
+    """Go straight to the plan. Checked topics still get more time; nothing is graded."""
+    if _ready_units(result) is None:
+        return False
+    st.session_state.quiz = {"topics": [], "quiz": Quiz(items=()), "answers": [], "revealed": False,
+                             "results": [], "error": None, "skipped": True}
+    st.session_state.quiz_summary = "skipped."
+    return True
 
 
 def _summary(quiz: Quiz, results) -> str:
@@ -112,64 +104,89 @@ def _render_skipped(quiz: Quiz) -> None:
         st.caption(f"No question for {title}: {reason}")
 
 
+def _answer(data: dict[str, Any], choice: int) -> None:
+    data["answers"].append(choice)
+    data["revealed"] = True
+
+
+def _next(data: dict[str, Any], units: Sequence[StudyUnit]) -> None:
+    data["revealed"] = False
+    quiz: Quiz = data["quiz"]
+    if len(data["answers"]) == len(quiz.items):
+        data["results"] = grade_quiz(learner_state(units), quiz, data["answers"])
+        st.session_state.quiz_summary = _summary(quiz, data["results"])
+
+
 def render_quiz(result: Outline, units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> None:
-    """The quiz panel beside the PDF: questions first, then every answer with its source."""
+    """The current question, the feedback on the last answer, or every answer once the check is done."""
     data = _data()
     if data["error"]:
         st.error(data["error"])
-        if st.button("Try again", key="quiz_retry"):
+        if st.button("Try again", key="quiz_retry", type="primary"):
             _build(result, units, pages, data["topics"])
             st.rerun()
         return
-
-    quiz: Quiz = data["quiz"]
-    if data["results"] is None:
-        st.caption(f"{len(quiz.items)} question{'s' if len(quiz.items) != 1 else ''}. Answer every question, "
-                   "then submit to see the answers.")
-        with st.form("initial_quiz"):
-            for number, item in enumerate(quiz.items, start=1):
-                st.markdown(f"**Question {number} · {item.topic_title}**")
-                st.text(item.question.prompt)
-                st.radio(f"Answer for question {number}", item.question.options, index=None,
-                         key=f"quiz_choice_{item.id}", label_visibility="collapsed")
-            submitted = st.form_submit_button("Submit answers", type="primary")
-        _render_skipped(quiz)
-        if submitted:
-            picked = [st.session_state.get(f"quiz_choice_{item.id}") for item in quiz.items]
-            if any(choice is None for choice in picked):
-                st.warning("Answer every question before submitting.")
-                return
-            choices = [item.question.options.index(choice) for item, choice in zip(quiz.items, picked)]
-            data["results"] = grade_quiz(learner_state(units), quiz, choices)
-            st.session_state.quiz_summary = _summary(quiz, data["results"])
-            st.rerun()
+    if data["results"] is not None:
+        _render_results(data)
         return
 
+    quiz: Quiz = data["quiz"]
+    total = len(quiz.items)
+    answered = len(data["answers"])
+    number = answered if data["revealed"] else answered + 1
+    item = quiz.items[number - 1]
+    st.progress(answered / total, text=f"Question {number} of {total}")
+    if data["revealed"]:
+        with st.container(border=True, key=f"quiz_feedback_{item.id}"):
+            render_feedback(number, item.topic_title, item.question, data["answers"][-1], f"quiz_feedback_{item.id}")
+            if item.question.correct_index == data["answers"][-1] and item.topic_number in weak_topics_in_order():
+                st.caption("You marked this topic as not understood but answered correctly. Uncheck it in "
+                           "Topics if you are confident.")
+        last = answered == total
+        st.button("See my results" if last else "Next question", key="quiz_next", type="primary",
+                  on_click=_next, args=(data, units))
+        return
+
+    with st.container(border=True, key=f"quiz_question_{item.id}"):
+        st.markdown(f"**{item.topic_title}**")
+        st.text(item.question.prompt)
+        choice = st.radio(f"Answer for question {number}", item.question.options, index=None,
+                          key=f"quiz_choice_{item.id}", label_visibility="collapsed")
+    if st.button("Check answer", key="quiz_submit", type="primary", disabled=choice is None):
+        _answer(data, item.question.options.index(choice))
+        st.rerun()
+    if answered == 0:
+        _render_skipped(quiz)
+
+
+def _render_results(data: dict[str, Any]) -> None:
     results = data["results"]
     if data.get("skipped"):
-        st.info("You skipped the initial quiz. The plan gives more time to the topics you checked.")
-    elif results:
-        st.markdown(f"**{sum(r.correct for r in results)} of {len(results)} correct.**")
-    else:
+        st.info("You skipped the quick check. The plan gives more time to the topics you checked.")
+        return
+    if not results:
         st.info("No question could be prepared from the material for these topics.")
-    checked = set(weak_topics_in_order())
-    for number, item_result in enumerate(results, start=1):
-        item = item_result.item
-        with st.container(border=True, key=f"quiz_result_{item.id}"):
-            render_feedback(number, item.topic_title, item.question, item_result.choice, f"quiz_feedback_{item.id}")
-            if item_result.correct and item.topic_number in checked:
-                st.caption("You marked this topic as not understood but answered correctly. "
-                           "Uncheck it in the outline if you are confident.")
-    _render_skipped(quiz)
+        _render_skipped(data["quiz"])
+        return
+    right = sum(r.correct for r in results)
+    st.markdown(f"**{right} of {len(results)} correct.**")
+    wrong = [r.item.topic_title for r in results if not r.correct]
+    if wrong:
+        st.caption("The plan gives more time to: " + "; ".join(wrong) + ".")
+    with st.expander(f"Your answers ({len(results)})"):
+        for number, item_result in enumerate(results, start=1):
+            item = item_result.item
+            render_feedback(number, item.topic_title, item.question, item_result.choice, f"quiz_result_{item.id}")
+    _render_skipped(data["quiz"])
 
 
 def render_quiz_review() -> None:
-    """The quiz answers again, for the Progress view."""
+    """The quick check's answers again, for the Progress page."""
     data = _data()
     if not done() or not data["results"]:
         return
     results = data["results"]
-    with st.expander(f"Initial quiz: {sum(r.correct for r in results)} of {len(results)} correct"):
+    with st.expander(f"Quick check: {sum(r.correct for r in results)} of {len(results)} correct"):
         for number, item_result in enumerate(results, start=1):
             item = item_result.item
             render_feedback(number, item.topic_title, item.question, item_result.choice, f"quiz_review_{item.id}")

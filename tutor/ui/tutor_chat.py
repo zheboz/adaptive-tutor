@@ -1,21 +1,41 @@
-"""The "Ask the tutor" chat: questions answered from the learner's material, with checked quotes."""
+"""The "Ask the tutor" chat: questions answered from the learner's material, with checked quotes.
+
+It needs only the PDF, so it is offered while the learner reviews the topics and beside the PDF
+while they study."""
 
 from collections.abc import Sequence
-from typing import Any
-
 import streamlit as st
 
 from tutor.agent.qa import QASession, ask, start_qa
 from tutor.assessment import retrieval
 from tutor.llm import LLMError
 from tutor.materials.ingest import PdfPage
+from tutor.materials.outline import Outline
+from tutor.ui import learner, navigation
 from tutor.ui.citations import render_sources
+
+
+def tutor_context(result: Outline | None) -> dict:
+    """What the tutor should know about the learner when answering a question."""
+    topics = result.topics if result is not None else []
+    context: dict = {"weak_topics": [
+        topics[number - 1].title for number in sorted(learner.weak_topic_numbers()) if number <= len(topics)
+    ]}
+    days = st.session_state.get("study_plan")
+    number = navigation.current_day()
+    if days and st.session_state.get("planned_days") is not None and number <= len(days):
+        context["study_day"] = number
+        context["todays_units"] = [
+            {"title": a.unit.title, "objective": a.unit.objective, "pages": list(a.source_ids)}
+            for a in days[number - 1].assignments
+        ]
+    return context
 
 
 def qa_session(pages: Sequence[PdfPage]) -> QASession:
     session = st.session_state.get("qa_session")
     if session is None:
-        # Share the passage index with the initial quiz.
+        # Share the passage index with the quick check.
         if "passage_index" not in st.session_state:
             st.session_state.passage_index = retrieval.build_index(pages)
         session = start_qa(pages, st.session_state.passage_index)
@@ -23,8 +43,9 @@ def qa_session(pages: Sequence[PdfPage]) -> QASession:
     return session
 
 
-def render_tutor_chat(pages: Sequence[PdfPage], context: dict[str, Any], height: int) -> None:
+def render_tutor_chat(pages: Sequence[PdfPage], result: Outline | None, height: int) -> None:
     session = qa_session(pages)
+    context = tutor_context(result)
     chat = st.container(key="tutor_chat")
     messages = chat.container(height=height, border=True, key="tutor_chat_panel")
     question = chat.chat_input("Ask about your material", key="tutor_question")

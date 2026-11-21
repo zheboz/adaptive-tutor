@@ -145,7 +145,7 @@ def _request(name: str, send: Callable[[OpenAI, str], Any]) -> Any:
     """Send one request with this session's key and model, and record its span."""
     api_key = _api_key()
     if not api_key:
-        raise LLMError("Enter your OpenAI API key at the top of the page to use the tutor.")
+        raise LLMError("Enter your OpenAI API key in the settings to use the tutor.")
     model = current_model()
     start = time.perf_counter()
     try:
@@ -245,7 +245,7 @@ def list_models(api_key: str | None = None) -> list[str]:
     """Chat model IDs the key can use, for a model picker. Errors are safe to show."""
     api_key = api_key or _api_key()
     if not api_key:
-        raise LLMError("Enter your OpenAI API key at the top of the page to use the tutor.")
+        raise LLMError("Enter your OpenAI API key in the settings to use the tutor.")
     try:
         with _client(api_key) as client:
             ids = [model.id for model in client.models.list()]

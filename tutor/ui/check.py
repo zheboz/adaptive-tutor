@@ -1,4 +1,5 @@
-"""The daily check in the plan panel: after studying a day, the learner asks to be checked.
+"""The daily check: after studying a day, the learner asks to be checked. The check takes the whole
+width of the Today page and hides the PDF; the pages behind each answer open in a window.
 
 Questions are prepared from that day's pages only, in the background as soon as the day is opened.
 When none can be made, the panel says why; otherwise the ReAct agent asks up to eight of them, at most
@@ -97,6 +98,10 @@ def _prepare(check: dict[str, Any], units: Sequence[StudyUnit], pages: Sequence[
     check["session"] = session
 
 
+def active() -> bool:
+    return bool(st.session_state.get("check"))
+
+
 def end_check() -> None:
     st.session_state.pop("check", None)
 
@@ -163,12 +168,13 @@ def _evidence_line(check: dict[str, Any]) -> str:
 
 
 def render_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> bool:
-    """Show the active check. Returns True while a check occupies the plan panel."""
+    """Show the active check. Returns True while a check is open."""
     check = st.session_state.get("check")
     if not check:
         return False
     titles = {unit.unit_id: unit.title for unit in units}
-    st.subheader(f"Day {check['day']} check")
+    st.subheader(f"Day {check['day']} check", anchor=False)
+    st.caption("Answer from what you learned: the PDF is hidden until the check ends.")
 
     if check["session"] is None and check["empty"] is None and not check["error"]:
         _prepare(check, units, pages)

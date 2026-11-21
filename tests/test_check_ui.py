@@ -1,12 +1,8 @@
-import unittest
 from unittest.mock import patch
 
-from streamlit.testing.v1 import AppTest
-
 from tests.test_agent_loop import ScriptedModel, turn
-from tests.test_outline_ui import upload
-from tests.test_pdf_preview import APP, button
-from tests.test_planning_ui import create_plan, metrics, open_day, show_view, visible_text
+from tests.test_pdf_preview import button, previewed_pdf
+from tests.ui_helpers import UITestCase, begin, create_plan, metrics, open_day, show_page, visible_text
 from tutor.assessment.questions import InsufficientEvidence, PracticeError, Question
 from tutor.llm import LLMError
 from tutor.materials.cards import KnowledgePoint, UnitCard
@@ -34,8 +30,9 @@ def qid(unit_id, n):
     return f"study0-{page}:{unit_id}:q{n}"
 
 
-class CheckUITests(unittest.TestCase):
+class CheckUITests(UITestCase):
     def setUp(self):
+        super().setUp()
         topics = [Topic(title=t, summary=f"Learn {t.lower()}.", source_ids=[page]) for t, page in PAGES.items()]
         self.enterContext(patch("tutor.materials.outline.generate_outline")).return_value = Outline(topics=topics)
         planner = self.enterContext(patch("tutor.planning.units.generate_structured"))
@@ -50,18 +47,23 @@ class CheckUITests(unittest.TestCase):
         self.enterContext(patch("tutor.agent.loop.call_with_tools", side_effect=self.model))
         self.enterContext(patch("tutor.materials.cards.build_card", side_effect=lambda title, *_: UnitCard((
             KnowledgePoint(f"{title} rule", "What it does.", ("A detail.",), "p1", "x = 2"),))))
-        self.app = AppTest.from_file(APP, default_timeout=10).run()
-        upload(self.app, "Assignment: x = 2.", "Updates: x = x + 1.", "Loops: range(3).")
+        self.app = self.new_app()
+        self.document = begin(self.app, "Assignment: x = 2.", "Updates: x = x + 1.", "Loops: range(3).")
         create_plan(self.app, 3)
 
     def panel(self):
-        return self.app.main.container("plan_panel")
+        """The check while it is open; otherwise the day beside the PDF."""
+        return self.app.main.container("check_panel" if "check" in self.app.session_state else "study_panel")
 
     def text(self):
         panel = self.panel()
         extra = [item.value for group in (panel.markdown, panel.info, panel.warning, panel.error, panel.success)
                  for item in group]
         return "\n".join([visible_text(panel), *extra])
+
+    def day_row(self):
+        """The row of days above the PDF."""
+        return visible_text(self.app.main.container("day_strip"))
 
     def questions_fail(self, error):
         """Today's questions were prepared when the day opened; prepare them again, failing."""
@@ -82,9 +84,9 @@ class CheckUITests(unittest.TestCase):
         self.assertEqual(len(self.app.session_state["day_banks"]), 1)
 
     def test_daily_checks_ask_from_the_days_pages_and_adjust_the_plan(self):
-        show_view(self.app, "Plan")
+        show_page(self.app, "Plan")
         self.assertEqual(metrics(self.app), {"Goal": "3 days", "Plan": "3 days", "Checked": "0", "To go": "3"})
-        show_view(self.app, "Today")
+        show_page(self.app, "Today")
 
         # Day 1: one right answer; the check continues without a change.
         self.model.turns += [
@@ -103,7 +105,7 @@ class CheckUITests(unittest.TestCase):
         self.assertIn("The plan is unchanged.", text)
         button(self.panel(), "Continue").click().run()
         self.assertIn("Day 1 · checked", [s.value for s in self.panel().subheader])
-        self.assertIn("1 of 3 days checked", self.text())
+        self.assertIn("1 of 3 days checked", self.day_row())
         self.assertEqual(self.app.segmented_control(key="day_picker").options, ["1 ✓", "2", "3"])
 
         # Day 2: one wrong answer and two right ones add no review.
@@ -128,7 +130,7 @@ class CheckUITests(unittest.TestCase):
         self.assertIn("Updates: mixed answers (2 of 3 correct)", text)
         self.assertNotIn("Plan change", text)
         button(self.panel(), "Continue").click().run()
-        self.assertIn("2 of 3 days checked", self.text())
+        self.assertIn("2 of 3 days checked", self.day_row())
 
         # Day 3: two wrong answers out of three add a review at the end of the plan.
         open_day(self.app, 3)
@@ -149,8 +151,8 @@ class CheckUITests(unittest.TestCase):
         self.assertIn("Loops: needs review (1 of 3 correct)", text)
         self.assertIn("Your answers in this check (3)", [e.label for e in self.panel().expander])
         button(self.panel(), "Continue").click().run()
-        self.assertIn("3 of 4 days checked", self.text())
-        show_view(self.app, "Plan")
+        self.assertIn("3 of 4 days checked", self.day_row())
+        show_page(self.app, "Plan")
         overview = self.app.main.container("plan_overview_panel")
         self.assertEqual(metrics(self.app)["Plan"], "4 days")
         self.assertIn("The plan now needs 4 days, 1 more than your goal", overview.warning[0].value)
@@ -161,6 +163,23 @@ class CheckUITests(unittest.TestCase):
         open_day(self.app, 4)
         self.assertIn("Review · Loops", visible_text(self.panel()))
         self.assertEqual(self.app.segmented_control(key="day_picker").options, ["1 ✓", "2 ✓", "3 ✓", "4 ↻"])
+
+    def test_the_check_hides_the_pdf_and_opens_sources_in_a_window(self):
+        self.assertTrue(self.app.get("component_instance"))
+        self.model.turns += [
+            turn("ask_question", 1, unit_id="unit-1", reason="Check today's unit."),
+            turn("ask_question", 2, unit_id="unit-1", reason="Once more."),
+        ]
+        button(self.panel(), "Check my understanding").click().run()
+        self.assertFalse(self.app.get("component_instance"))
+        self.assertNotIn("today_tab", [w.key for w in self.app.segmented_control])
+        self.assertIn("the PDF is hidden until the check ends", self.text())
+        self.answer(qid("unit-1", 1), "3")
+        button(self.panel(), "Page 1").click().run()
+        self.assertEqual(previewed_pdf(self.app), (self.document, [1]))
+        self.assertIn("Question 1 · Assignment: Not quite.", self.text())
+        button(self.panel(), "Stop check").click().run()
+        self.assertEqual(previewed_pdf(self.app), (self.document, [1]))
 
     def test_a_day_with_nothing_to_ask_says_why(self):
         self.questions_fail(InsufficientEvidence("The assigned pages have no teaching point to assess."))
@@ -173,7 +192,7 @@ class CheckUITests(unittest.TestCase):
         self.assertEqual(self.model.seen, [])
         button(self.panel(), "Continue").click().run()
         self.assertIn("Day 1 · checked", [s.value for s in self.panel().subheader])
-        self.assertIn("1 of 3 days checked", self.text())
+        self.assertIn("1 of 3 days checked", self.day_row())
 
     def test_questions_that_fail_verification_can_be_prepared_again(self):
         self.questions_fail(PracticeError("A question referenced a learning point that is not in the "
@@ -231,8 +250,8 @@ class KnowledgeCardUITests(CheckUITests):
             self.app.run()
             self.assertIn("The knowledge points could not be prepared. Could not reach OpenAI.",
                           [w.value for w in self.panel().warning])
-            show_view(self.app, "Plan")
-            show_view(self.app, "Today")
+            show_page(self.app, "Plan")
+            show_page(self.app, "Today")
             self.assertEqual(build.call_count, 2)  # today's failure, and the next day in the background
             button(self.panel(), "Try again").click().run()
         self.assertIn("<strong>1. Again</strong><br>Works now.", "\n".join(h.value for h in self.panel().html))
@@ -243,3 +262,4 @@ class KnowledgeCardUITests(CheckUITests):
     test_a_day_with_nothing_to_ask_says_why = None
     test_questions_that_fail_verification_can_be_prepared_again = None
     test_an_outage_can_be_retried_or_the_check_stopped = None
+    test_the_check_hides_the_pdf_and_opens_sources_in_a_window = None

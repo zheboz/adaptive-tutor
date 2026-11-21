@@ -1,5 +1,4 @@
-"""The step bar above the page and the views beside the PDF: Outline, Initial quiz, Today, Plan,
-Ask the tutor and Progress."""
+"""What the setup steps and the workspace pages show: the outline, a study day, the plan, progress."""
 
 from collections.abc import Sequence
 from html import escape
@@ -9,26 +8,8 @@ import streamlit as st
 from tutor.materials.ingest import PdfPage
 from tutor.materials.outline import Outline
 from tutor.planning import StudyDay, StudyUnit
-from tutor.ui import cards, check, learner, navigation, quiz
+from tutor.ui import cards, check, learner, quiz
 from tutor.ui.citations import render_sources
-
-
-STEPS = ("Upload", "Outline", "Mark & quiz", "Plan", "Study")
-
-
-def render_steps(current: int, hint: str) -> None:
-    """Where the learner is in the flow, and what to do next."""
-    parts = []
-    for number, name in enumerate(STEPS, start=1):
-        if number < current:
-            parts.append(f"✓ {name}")
-        elif number == current:
-            parts.append(f"**{number} · {name}**")
-        else:
-            parts.append(f"{number} · {name}")
-    with st.container(key="steps"):
-        st.markdown("  ›  ".join(parts))
-        st.caption(f"Next: {hint}")
 
 
 def unit_label(unit: StudyUnit, outline: Outline | None) -> str:
@@ -42,15 +23,17 @@ def unit_label(unit: StudyUnit, outline: Outline | None) -> str:
 
 
 def render_outline_topics(result: Outline) -> None:
-    st.caption("Check the topics you don't understand. The initial quiz asks about them first, "
-               "and the plan gives them more time.")
-    for index, topic in enumerate(result.topics):
-        st.html(f"<h3>{escape(topic.title)}</h3><p>{escape(topic.summary)}</p>")
-        learner.render_weak_topic_checkbox(index)
-        render_sources(topic.source_ids, f"citation_{index}")
+    """Each topic with its summary, its pages and the box to mark it as not understood."""
+    with st.container(key="outline_panel"):
+        for index, topic in enumerate(result.topics):
+            with st.container(border=True, key=f"topic_{index}"):
+                st.html(f"<h4>{index + 1}. {escape(topic.title)}</h4><p>{escape(topic.summary)}</p>")
+                with st.container(horizontal=True, vertical_alignment="center"):
+                    learner.render_weak_topic_checkbox(index)
+                    render_sources(topic.source_ids, f"citation_{index}")
 
 
-def _day_label(days: Sequence[StudyDay], done: set[int]):
+def day_label(days: Sequence[StudyDay], done: set[int]):
     def label(number: int) -> str:
         if number > len(days):
             return f"{number}"
@@ -59,15 +42,10 @@ def _day_label(days: Sequence[StudyDay], done: set[int]):
     return label
 
 
-def render_today(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> None:
-    """The open study day: what to read and do, then the check."""
-    if check.render_check(units, pages):
-        return
+def render_study_day(units: Sequence[StudyUnit], pages: Sequence[PdfPage], day: int) -> None:
+    """The open study day: each unit's knowledge points, its task and pages, then the check."""
     days = st.session_state.study_plan
-    planned_days = st.session_state.planned_days
     done = check.completed_days()
-    day = navigation.render_day_picker(max(planned_days, len(days)), _day_label(days, done))
-    st.caption(f"{len(done)} of {len(days)} days checked · ✓ checked · ↻ review")
     st.subheader(f"Day {day} · checked" if day in done else f"Day {day}", anchor=False)
     if day > len(days):
         st.info("Optional review day. Choose an earlier day to revisit its reading or repeat a study task.")
@@ -98,8 +76,25 @@ def _pages_text(source_ids: Sequence[str]) -> str:
     return ", ".join(map(str, numbers))
 
 
+def plan_rows(days: Sequence[StudyDay], planned_days: int, done: set[int] = frozenset()) -> list[dict]:
+    rows = [
+        {"Day": day.number, "Status": "✓ checked" if day.number in done else "",
+         "Study": " · ".join(f"{a.kind.capitalize()}: {a.unit.title}" for a in day.assignments),
+         "Pages": _pages_text(tuple(dict.fromkeys(p for a in day.assignments for p in a.source_ids)))}
+        for day in days
+    ]
+    if planned_days > len(days):
+        rows += [{"Day": n, "Status": "", "Study": "Optional review", "Pages": ""}
+                 for n in range(len(days) + 1, planned_days + 1)]
+    return rows
+
+
+def more_time_text(units: Sequence[StudyUnit], weak: Sequence[str], outline: Outline | None) -> str:
+    return "; ".join(unit_label(u, outline) for u in units if u.unit_id in set(weak))
+
+
 def render_plan_overview(units: Sequence[StudyUnit], result: Outline) -> None:
-    """Every day at a glance, why the plan looks the way it does, and the outline."""
+    """Every day at a glance, and why the plan looks the way it does."""
     days = st.session_state.study_plan
     planned_days = st.session_state.planned_days
     done = check.completed_days()
@@ -111,27 +106,15 @@ def render_plan_overview(units: Sequence[StudyUnit], result: Outline) -> None:
         st.metric("To go", to_go)
     if len(days) > planned_days:
         st.warning(f"The plan now needs {len(days)} days, {len(days) - planned_days} more than your goal, "
-                   "because reviews were added after your checks. Study at your own pace, or create the "
-                   "plan again with more days.")
-    weak = set(st.session_state.get("planned_weak", ()))
+                   "because reviews were added after your checks. Study at your own pace, or change the "
+                   "plan below.")
+    weak = st.session_state.get("planned_weak", ())
     if weak:
-        st.caption("More time for: " + "; ".join(unit_label(u, result) for u in units if u.unit_id in weak))
+        st.caption("More time for: " + more_time_text(units, weak, result))
     if st.session_state.get("quiz_summary"):
-        st.caption(f"Initial quiz: {st.session_state.quiz_summary}")
-    rows = [
-        {"Day": day.number, "Status": "✓ checked" if day.number in done else "",
-         "Study": " · ".join(f"{a.kind.capitalize()}: {a.unit.title}" for a in day.assignments),
-         "Pages": _pages_text(tuple(dict.fromkeys(p for a in day.assignments for p in a.source_ids)))}
-        for day in days
-    ]
-    if planned_days > len(days):
-        rows += [{"Day": n, "Status": "", "Study": "Optional review", "Pages": ""}
-                 for n in range(len(days) + 1, planned_days + 1)]
-    st.dataframe(rows, hide_index=True, key="plan_table")
+        st.caption(f"Quick check: {st.session_state.quiz_summary}")
+    st.dataframe(plan_rows(days, planned_days, done), hide_index=True, key="plan_table")
     check.render_plan_changes()
-    with st.expander("Outline"):
-        st.caption("Changes to the checked topics take effect when you create the plan again.")
-        render_outline_topics(result)
 
 
 def render_progress(units: Sequence[StudyUnit]) -> None:

@@ -1,18 +1,14 @@
 import re
-import unittest
 from unittest.mock import patch
 
-from streamlit.testing.v1 import AppTest
-
-from tests.test_outline_ui import upload
-from tests.test_pdf_preview import APP, button
-from tests.test_planning_ui import create_plan, show_view, visible_text
+from tests.ui_helpers import UITestCase, begin, create_plan, show_page, visible_text
 from tutor.materials.outline import Outline, Topic
 from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
 
 
-class LearnerUITests(unittest.TestCase):
+class LearnerUITests(UITestCase):
     def setUp(self):
+        super().setUp()
         topics = [
             Topic(title="Assignment", summary="Store a value.", source_ids=["p1"]),
             Topic(title="Iteration", summary="Repeat a block.", source_ids=["p2"]),
@@ -27,11 +23,11 @@ class LearnerUITests(unittest.TestCase):
                             for n, t in enumerate(topics, 1)]),
         ]
         self.generate = self.enterContext(patch("tutor.assessment.questions.generate_questions"))
-        self.app = AppTest.from_file(APP).run()
-        upload(self.app, "Assignment: x = 2.", "Iteration: loop twice.", "Counting: range(3).")
+        self.app = self.new_app()
+        begin(self.app, "Assignment: x = 2.", "Iteration: loop twice.", "Counting: range(3).")
 
     def status_text(self):
-        show_view(self.app, "Progress")
+        show_page(self.app, "Progress")
         html = visible_text(self.app.main.container("learning_status_panel"))
         return re.sub(r"\s*<br>\s*", "\n", re.sub(r"</?(?:p|strong|small)>", "", html))
 
@@ -42,7 +38,7 @@ class LearnerUITests(unittest.TestCase):
         self.assertFalse(self.app.exception)
 
     def plan_text(self):
-        show_view(self.app, "Plan")
+        show_page(self.app, "Plan")
         return visible_text(self.app.main.container("plan_overview_panel"))
 
     def test_weak_topics_on_the_outline_get_more_time(self):
@@ -62,8 +58,8 @@ class LearnerUITests(unittest.TestCase):
         self.plan(3, 0, 2)
         self.assertEqual(self.app.session_state["planned_weak"], ("unit-1", "unit-3"))
         self.assertIn("Loop counts · Marked weak · not checked yet", self.status_text())
-        # The outline is in the Plan view now; its checks keep what was checked before.
-        show_view(self.app, "Plan")
+        # The outline is under Change the plan now; its checks keep what was checked before.
+        show_page(self.app, "Plan")
         self.assertTrue(self.app.checkbox(key="weak_topic_0").value)
         # Unchecking alone changes nothing until the plan is created again.
         self.app.checkbox(key="weak_topic_0").uncheck().run()
