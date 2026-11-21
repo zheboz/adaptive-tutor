@@ -1,7 +1,10 @@
 import json
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
+from tutor.materials import outline as outline_module
 from tutor.materials.ingest import PdfPage
 from tutor.materials.outline import Outline, OutlineError, Topic, generate_outline
 
@@ -46,7 +49,11 @@ class OutlineTests(unittest.TestCase):
         generate.side_effect = summarize
         result = generate_outline(pages)
         self.assertGreater(generate.call_count, 1)
-        chunks = [chunk for call in generate.call_args_list for chunk in json.loads(call.kwargs["content"])]
+        # Batches are read in parallel, so the calls may come in any order; each batch is sent once.
+        sent = sorted(call.kwargs["content"] for call in generate.call_args_list)
+        batches = list(outline_module._batches(pages))
+        self.assertEqual(sent, sorted(json.dumps(batch, ensure_ascii=False) for batch in batches))
+        chunks = [chunk for batch in batches for chunk in batch]
         for page in pages:
             self.assertEqual("".join(c["text"] for c in chunks if c["id"] == f"p{page.number}"), page.text)
         self.assertEqual(result.topics, [Topic(title="Loops", summary="Trace updates.", source_ids=["p1", "p2"])])
@@ -72,3 +79,52 @@ class OutlineTests(unittest.TestCase):
                 generate.return_value = Outline(topics=topics)
                 with self.assertRaises(OutlineError):
                     generate_outline(pages)
+
+
+class ParallelOutlineTests(unittest.TestCase):
+    """Batches are read at the same time and reported in page order."""
+
+    def setUp(self):
+        self.enterContext(patch("tutor.materials.outline._BATCH_PAGES", 1))
+        self.pages = [PdfPage(n, f"Lesson {n}.") for n in (1, 2, 3)]
+        self.later_batches_done = threading.Event()
+        self.lock = threading.Lock()
+        self.finished = []
+        self.fail_second = False
+
+    def summarize(self, *, instructions, content, schema):
+        page = json.loads(content)[0]["id"]
+        if page == "p1":
+            # The first batch is the slowest: it ends after the other two.
+            self.later_batches_done.wait(5)
+            time.sleep(0.05)
+        else:
+            with self.lock:
+                self.finished.append(page)
+                if len(self.finished) == 2:
+                    self.later_batches_done.set()
+        if page == "p2" and self.fail_second:
+            raise OutlineError("A topic cited a missing or unreadable page. Please try again.")
+        return Outline(topics=[Topic(title=f"Topic {page}", summary="Text.", source_ids=[page])])
+
+    def test_progress_lists_topics_in_page_order_while_later_batches_finish_first(self):
+        reports = []
+        with patch("tutor.materials.outline.generate_structured", side_effect=self.summarize) as generate:
+            result = generate_outline(self.pages, lambda topics, done, total: reports.append(
+                ([t.title for t in topics], done, total)))
+        self.assertEqual(generate.call_count, 3)
+        titles = [t.title for t in result.topics]
+        self.assertEqual(titles, ["Topic p1", "Topic p2", "Topic p3"])
+        self.assertEqual(reports[0], ([], 0, 3))
+        self.assertEqual(reports[-1], (titles, 3, 3))
+        # Until the first batch is done, nothing is shown, although later batches are finished.
+        self.assertIn(([], 2, 3), reports)
+        for shown, done, total in reports:
+            self.assertEqual(shown, titles[:len(shown)])
+        self.assertEqual([done for _, done, _ in reports], sorted({done for _, done, _ in reports}))
+
+    def test_a_failed_batch_fails_the_outline(self):
+        self.fail_second = True
+        with patch("tutor.materials.outline.generate_structured", side_effect=self.summarize):
+            with self.assertRaises(OutlineError):
+                generate_outline(self.pages)

@@ -1,0 +1,9 @@
+# The notebook look (see the layout CSS in app.py) is drawn on a light page.
+[theme]
+base = "light"
+primaryColor = "#2457C5"
+font = "IBM Plex Sans:https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+
+# No developer menu for learners; the toolbar itself is hidden by the layout CSS in app.py.
+[client]
+toolbarMode = "minimal"

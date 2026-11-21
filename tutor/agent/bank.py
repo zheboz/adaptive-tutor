@@ -115,9 +115,13 @@ class QuestionBank:
     def _ensure(self, unit_id: str) -> None:
         if unit_id in self._questions:
             return
-        future = self._pending.pop(unit_id, None)
-        # A failed request is not cached, so the next pick retries it.
-        self._questions[unit_id] = future.result() if future is not None else self._build(unit_id)
+        future = self._pending.get(unit_id)
+        try:
+            # Stored before the pending job is dropped, so a prefetch in between never starts it again.
+            self._questions[unit_id] = future.result() if future is not None else self._build(unit_id)
+        finally:
+            # A failed request is not cached, so the next pick retries it.
+            self._pending.pop(unit_id, None)
 
     def forget(self, unit_ids: Iterable[str]) -> None:
         """Drop the cached result for these units, so the next use builds their questions again."""

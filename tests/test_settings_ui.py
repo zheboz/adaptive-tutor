@@ -7,7 +7,7 @@ from tutor.llm import LLMError
 from tutor.materials.outline import Outline, Topic
 
 
-def one_topic(pages):
+def one_topic(pages, *_):
     return Outline(topics=[Topic(title="Loops", summary="Repeat.", source_ids=["p1"])])
 
 
@@ -57,7 +57,7 @@ class SettingsUITests(UITestCase):
         # Model calls in this session use the learner's key and model.
         seen = []
 
-        def outline(pages):
+        def outline(pages, *_):
             seen.append((llm._api_key(), llm.current_model()))
             return one_topic(pages)
 
@@ -77,7 +77,7 @@ class SettingsUITests(UITestCase):
         self.assertEqual(self.app.session_state["setup_step"], 2)
         seen = []
         with patch("tutor.materials.outline.generate_outline",
-                   side_effect=lambda pages: seen.append(llm.current_model()) or one_topic(pages)):
+                   side_effect=lambda pages, *_: seen.append(llm.current_model()) or one_topic(pages)):
             # Make the outline again, as after replacing the material.
             del self.app.session_state["study_outline"]
             self.app.run()
@@ -95,7 +95,7 @@ class SettingsUITests(UITestCase):
         self.fields().text_input(key="model_other").set_value("gpt-5.4-nano").run()
         seen = []
         with patch("tutor.materials.outline.generate_outline",
-                   side_effect=lambda pages: seen.append(llm.current_model()) or one_topic(pages)):
+                   side_effect=lambda pages, *_: seen.append(llm.current_model()) or one_topic(pages)):
             begin(self.app, "Loops: range(3).", key=None)
         self.assertEqual(seen, ["gpt-5.4-nano"])
         self.assertEqual(self.fields().text_input(key="model_other").value, "gpt-5.4-nano")

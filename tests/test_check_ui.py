@@ -1,12 +1,15 @@
+import json
 from unittest.mock import patch
 
 from tests.test_agent_loop import ScriptedModel, turn
 from tests.test_pdf_preview import button, previewed_pdf
-from tests.ui_helpers import UITestCase, begin, create_plan, metrics, open_day, show_page, visible_text
+from tests.ui_helpers import (UITestCase, begin, create_plan, metrics, open_day, show_page, visible_text,
+                               wait_for_jobs)
 from tutor.assessment.questions import InsufficientEvidence, PracticeError, Question
 from tutor.llm import LLMError
 from tutor.materials.cards import KnowledgePoint, UnitCard
 from tutor.materials.outline import Outline, Topic
+from tutor.ui.reader import HIGHLIGHT_COLORS
 from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
 
 
@@ -50,6 +53,8 @@ class CheckUITests(UITestCase):
         self.app = self.new_app()
         self.document = begin(self.app, "Assignment: x = 2.", "Updates: x = x + 1.", "Loops: range(3).")
         create_plan(self.app, 3)
+        # Opening day 1 prepared its check in the background; let that finish before the test starts.
+        wait_for_jobs(self.app)
 
     def panel(self):
         """The check while it is open; otherwise the day beside the PDF."""
@@ -106,7 +111,7 @@ class CheckUITests(UITestCase):
         button(self.panel(), "Continue").click().run()
         self.assertIn("Day 1 · checked", [s.value for s in self.panel().subheader])
         self.assertIn("1 of 3 days checked", self.day_row())
-        self.assertEqual(self.app.segmented_control(key="day_picker").options, ["1 ✓", "2", "3"])
+        self.assertEqual(self.app.segmented_control(key="day_picker").options, ["Day 1 ✓", "Day 2", "Day 3"])
 
         # Day 2: one wrong answer and two right ones add no review.
         open_day(self.app, 2)
@@ -161,8 +166,8 @@ class CheckUITests(UITestCase):
         self.assertEqual(rows[3]["Study"], "Review: Loops")
         self.assertEqual([r["Status"] for r in rows], ["✓ checked"] * 3 + [""])
         open_day(self.app, 4)
-        self.assertIn("Review · Loops", visible_text(self.panel()))
-        self.assertEqual(self.app.segmented_control(key="day_picker").options, ["1 ✓", "2 ✓", "3 ✓", "4 ↻"])
+        self.assertIn('<span class="unit-kind">Review</span><p><strong>Loops</strong>', visible_text(self.panel()))
+        self.assertEqual(self.app.segmented_control(key="day_picker").options, ["Day 1 ✓", "Day 2 ✓", "Day 3 ✓", "Day 4 ↻"])
 
     def test_the_check_hides_the_pdf_and_opens_sources_in_a_window(self):
         self.assertTrue(self.app.get("component_instance"))
@@ -181,15 +186,32 @@ class CheckUITests(UITestCase):
         button(self.panel(), "Stop check").click().run()
         self.assertEqual(previewed_pdf(self.app), (self.document, [1]))
 
+    def test_the_first_question_is_ready_before_the_check_starts(self):
+        # Prepare day 1's check again, now that the agent has a first step to give.
+        self.model.turns += [turn("ask_question", 1, unit_id="unit-1", reason="Ready in advance.")]
+        self.app.session_state["check_head_starts"] = {}
+        self.app.run()
+        wait_for_jobs(self.app)
+        self.app.run()
+        self.assertIn("Your first question is ready.", "\n".join(h.value for h in self.panel().html))
+        calls = len(self.model.seen)
+        button(self.panel(), "Check my understanding").click().run()
+        self.assertIn("Why this question: Ready in advance.", self.text())
+        # The question came from the head start: starting the check made no model call.
+        self.assertEqual(len(self.model.seen), calls)
+        self.assertNotIn(1, self.app.session_state["check_head_starts"])
+
     def test_a_day_with_nothing_to_ask_says_why(self):
         self.questions_fail(InsufficientEvidence("The assigned pages have no teaching point to assess."))
+        calls = len(self.model.seen)
         button(self.panel(), "Check my understanding").click().run()
         text = self.text()
         self.assertIn("There is nothing to check from today's material. When you continue, the day is "
                       "marked as checked", text)
         self.assertIn("Assignment: The assigned pages have no teaching point to assess.", text)
         self.assertNotIn("Try again", [b.label for b in self.panel().button])
-        self.assertEqual(self.model.seen, [])
+        # Nothing could be asked, so the check did not start the agent.
+        self.assertEqual(len(self.model.seen), calls)
         button(self.panel(), "Continue").click().run()
         self.assertIn("Day 1 · checked", [s.value for s in self.panel().subheader])
         self.assertIn("1 of 3 days checked", self.day_row())
@@ -224,7 +246,8 @@ class KnowledgeCardUITests(CheckUITests):
 
     def test_each_unit_lists_its_knowledge_points_with_their_page(self):
         panel = self.panel()
-        self.assertIn("<strong>1. Assignment rule</strong><br>What it does.", "\n".join(h.value for h in panel.html))
+        html = "\n".join(h.value for h in panel.html)
+        self.assertIn('<span class="note-number">1</span><strong>Assignment rule</strong></p><p>What it does.</p>', html)
         self.assertIn("<li>A detail.</li>", "\n".join(h.value for h in panel.html))
         self.assertIn("From page 1", [e.label for e in panel.expander])
         self.assertIn("“x = 2”", [c.value for c in panel.caption])
@@ -233,7 +256,20 @@ class KnowledgeCardUITests(CheckUITests):
         # The next day's cards were started in the background; opening it shows them.
         self.assertEqual(len(self.app.session_state["day_cards"]), 2)
         open_day(self.app, 2)
-        self.assertIn("<strong>1. Updates rule</strong>", "\n".join(h.value for h in self.panel().html))
+        self.assertIn("<strong>Updates rule</strong>", "\n".join(h.value for h in self.panel().html))
+
+    def test_the_page_highlights_the_quotes_of_the_days_points_in_their_notes_colors(self):
+        # Each note's key ends with its color, which the layout CSS paints.
+        self.assertTrue(self.app.main.container("card_1_0_point_1_note0"))
+        viewer = json.loads(self.app.get("component_instance")[0].proto.json_args)
+        self.assertEqual(len(viewer["annotations"]), 1)
+        mark = viewer["annotations"][0]
+        self.assertEqual((mark["page"], mark["height"], mark["color"]), (1, 0, HIGHLIGHT_COLORS[0]))
+        self.assertGreater(viewer["annotation_outline_size"], 1)
+        # On a page without the day's quotes, nothing is highlighted.
+        self.app.selectbox(key="pdf_page_number").set_value(2).run()
+        viewer = json.loads(self.app.get("component_instance")[0].proto.json_args)
+        self.assertEqual(viewer["annotations"], [])
 
     def test_a_failed_card_waits_for_try_again(self):
         self.app.session_state["day_cards"] = {}
@@ -254,7 +290,7 @@ class KnowledgeCardUITests(CheckUITests):
             show_page(self.app, "Today")
             self.assertEqual(build.call_count, 2)  # today's failure, and the next day in the background
             button(self.panel(), "Try again").click().run()
-        self.assertIn("<strong>1. Again</strong><br>Works now.", "\n".join(h.value for h in self.panel().html))
+        self.assertIn("<strong>Again</strong></p><p>Works now.</p>", "\n".join(h.value for h in self.panel().html))
 
     # The check tests run once, in CheckUITests.
     test_the_day_shows_no_practice_only_a_check = None

@@ -1,7 +1,13 @@
-"""Generate study topics from readable PDF pages and validate their citations."""
+"""Generate study topics from readable PDF pages and validate their citations.
 
+The pages are read in batches, several at a time. Each finished batch can be reported at once, in
+page order, so the learner sees the first topics while later batches are still being read.
+"""
+
+from collections.abc import Callable, Iterator
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+import contextvars
 import json
-from collections.abc import Iterator
 
 from pydantic import BaseModel
 
@@ -67,30 +73,74 @@ def _batches(pages: list[PdfPage]) -> Iterator[list[dict[str, str]]]:
         yield batch
 
 
-def generate_outline(pages: list[PdfPage]) -> Outline:
-    """Summarize every readable batch and retain physical page IDs for each topic."""
+# Batches read at the same time.
+_PARALLEL_BATCHES = 4
+
+# Called with the topics so far (from the batches before the first unfinished one, in page order),
+# the number of batches finished, and the number of batches.
+Progress = Callable[[list[Topic], int, int], None]
+
+
+def _batch_topics(batch: list[dict[str, str]]) -> list[Topic]:
+    """One batch's topics, checked against the pages in the batch."""
+    allowed_ids = {passage["id"] for passage in batch}
+    partial = generate_structured(
+        instructions=_INSTRUCTIONS, content=json.dumps(batch, ensure_ascii=False), schema=Outline
+    )
+    topics = []
+    for topic in partial.topics:
+        title = " ".join(topic.title.split())
+        summary = " ".join(topic.summary.split())
+        if not title or not summary:
+            raise OutlineError("A topic was missing a title or summary. Please try again.")
+        if not topic.source_ids or not allowed_ids.issuperset(topic.source_ids):
+            raise OutlineError("A topic cited a missing or unreadable page. Please try again.")
+        topics.append(Topic(title=title, summary=summary, source_ids=list(topic.source_ids)))
+    return topics
+
+
+def _merge(batches: list[list[Topic]]) -> list[Topic]:
+    """Topics with the same title become one, citing all their pages; ordered by their first page."""
     by_title: dict[str, Topic] = {}
-    for batch in _batches(pages):
-        allowed_ids = {passage["id"] for passage in batch}
-        partial = generate_structured(
-            instructions=_INSTRUCTIONS, content=json.dumps(batch, ensure_ascii=False), schema=Outline
-        )
-        for topic in partial.topics:
-            title = " ".join(topic.title.split())
-            summary = " ".join(topic.summary.split())
-            if not title or not summary:
-                raise OutlineError("A topic was missing a title or summary. Please try again.")
-            if not topic.source_ids or not allowed_ids.issuperset(topic.source_ids):
-                raise OutlineError("A topic cited a missing or unreadable page. Please try again.")
-
-            key = title.casefold()
+    for topics in batches:
+        for topic in topics:
+            key = topic.title.casefold()
             if key not in by_title:
-                by_title[key] = Topic(title=title, summary=summary, source_ids=[])
+                by_title[key] = Topic(title=topic.title, summary=topic.summary, source_ids=[])
             by_title[key].source_ids.extend(topic.source_ids)
-
-    if not by_title:
-        raise OutlineError("No study topics were found in the readable text. Try a PDF with teaching material.")
     for topic in by_title.values():
         topic.source_ids = sorted(set(topic.source_ids), key=lambda source: int(source[1:]))
-    topics = sorted(by_title.values(), key=lambda topic: int(topic.source_ids[0][1:]))
+    return sorted(by_title.values(), key=lambda topic: int(topic.source_ids[0][1:]))
+
+
+def generate_outline(pages: list[PdfPage], on_progress: Progress | None = None) -> Outline:
+    """Summarize every readable batch and retain physical page IDs for each topic.
+
+    Batches are read in parallel; `on_progress` hears about each finished one, with the topics of
+    the batches finished so far in page order. The first failure stops the outline."""
+    batches = list(_batches(pages))
+    report = on_progress or (lambda topics, done, total: None)
+    report([], 0, len(batches))
+    results: dict[int, list[Topic]] = {}
+    pool = ThreadPoolExecutor(max_workers=_PARALLEL_BATCHES, thread_name_prefix="outline-batch")
+    try:
+        # Each batch uses the caller's key and model.
+        running: dict[Future, int] = {
+            pool.submit(contextvars.copy_context().run, _batch_topics, batch): index
+            for index, batch in enumerate(batches)
+        }
+        while running:
+            finished, _ = wait(running, return_when=FIRST_COMPLETED)
+            for future in finished:
+                results[running.pop(future)] = future.result()
+            ready = 0
+            while ready in results:
+                ready += 1
+            report(_merge([results[index] for index in range(ready)]), len(results), len(batches))
+    finally:
+        # After a failure, batches not started yet are dropped; those running are let finish.
+        pool.shutdown(wait=True, cancel_futures=True)
+    topics = _merge([results[index] for index in range(len(batches))])
+    if not topics:
+        raise OutlineError("No study topics were found in the readable text. Try a PDF with teaching material.")
     return Outline(topics=topics)

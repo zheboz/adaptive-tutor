@@ -1,5 +1,7 @@
 """Driving the app in tests: the setup steps, then the study workspace."""
 
+from concurrent.futures import Future, wait
+import time
 import unittest
 from unittest.mock import patch
 
@@ -18,9 +20,37 @@ class UITestCase(unittest.TestCase):
     def setUp(self):
         self.list_models = self.enterContext(patch("tutor.ui.settings.list_models", return_value=[]))
         self.enterContext(patch("tutor.llm._request", side_effect=LLMError("No network in tests.")))
+        self._apps: list[AppTest] = []
 
     def new_app(self, **kwargs) -> AppTest:
-        return AppTest.from_file(APP, default_timeout=10, **kwargs).run()
+        app = AppTest.from_file(APP, default_timeout=10, **kwargs).run()
+        self._apps.append(app)
+        return app
+
+    def tearDown(self):
+        """Let the work these apps started in the background (outline, units, cards) finish while this
+        test's mocks are still in place, so none of it runs into the next test's mocks."""
+        for app in self._apps:
+            wait_for_jobs(app)
+        super().tearDown()
+
+
+def wait_for_jobs(app, seconds: float = 10):
+    """Wait for the background jobs the app's session holds: outline, units, cards, check head starts."""
+    wait(_jobs(app.session_state.values()), timeout=seconds)
+
+
+def _jobs(values) -> list[Future]:
+    """The background jobs among session values, also inside dicts, lists and tuples."""
+    found = []
+    for value in values:
+        if isinstance(value, Future):
+            found.append(value)
+        elif isinstance(value, dict):
+            found += _jobs(value.values())
+        elif isinstance(value, (list, tuple)):
+            found += _jobs(value)
+    return found
 
 
 def add_material(app, *pages, key: str | None = KEY) -> bytes:
@@ -36,7 +66,17 @@ def begin(app, *pages, key: str | None = KEY) -> bytes:
     """Add the material and open the Topics step, where the outline is made."""
     document = add_material(app, *pages, key=key)
     app.button(key="material_next").click().run()
+    wait_for_outline(app)
     return document
+
+
+def wait_for_outline(app, seconds: float = 5):
+    """While the outline is made in the background, Topics shows its progress and refreshes itself;
+    run the page again until the job is done, as that refresh would."""
+    end = time.monotonic() + seconds
+    while "outline_job" in app.session_state and time.monotonic() < end:
+        time.sleep(0.05)
+        app.run()
 
 
 def go_to_step(app, step: int):
