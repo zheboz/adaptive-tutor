@@ -36,9 +36,9 @@ def render_outline_topics(result: Outline) -> None:
 def day_label(days: Sequence[StudyDay], done: set[int]):
     def label(number: int) -> str:
         if number > len(days):
-            return f"{number}"
+            return f"Day {number}"
         review = any(a.kind == "review" for a in days[number - 1].assignments)
-        return f"{number}{' ✓' if number in done else ''}{' ↻' if review else ''}"
+        return f"Day {number}{' ✓' if number in done else ''}{' ↻' if review else ''}"
     return label
 
 
@@ -55,15 +55,22 @@ def render_study_day(units: Sequence[StudyUnit], pages: Sequence[PdfPage], day: 
     if day < len(days):
         cards.prefetch(days[day], pages)
     check.prefetch_questions(units, pages, day)
+    check.start_head_start(units, pages, day)
+    number = 1
     for index, assignment in enumerate(days[day - 1].assignments):
         unit = assignment.unit
-        st.html(f"<p><strong>{assignment.kind.capitalize()} · {escape(unit.title)}</strong>"
-                f"<br>{escape(unit.objective)}</p>")
-        cards.render_card(assignment, pages, f"card_{day}_{index}")
+        # Laid out as a notebook page; the classes are styled in app.py's layout CSS.
+        st.html(f'<div class="unit-heading"><span class="unit-kind">{assignment.kind.capitalize()}</span>'
+                f'<p><strong>{escape(unit.title)}</strong></p>'
+                f'<p class="unit-objective">{escape(unit.objective)}</p></div>')
+        number = cards.render_card(assignment, pages, f"card_{day}_{index}", number)
         if assignment.kind != "read":
-            st.html(f"<p><strong>Study task</strong><br>{escape(unit.activity)}</p>")
-        st.caption("All pages for this unit:")
-        render_sources(assignment.source_ids, f"plan_citation_{day}_{unit.unit_id}")
+            st.html('<div class="study-task"><p class="study-task-title"><span class="study-task-box"></span>'
+                    f"Study task</p><p>{escape(unit.activity)}</p></div>")
+        with st.container(key=f"unit_pages_{day}_{index}", gap="xsmall"):
+            st.caption("All pages for this unit:")
+            render_sources(sorted(assignment.source_ids, key=lambda source_id: int(source_id[1:])),
+                           f"plan_citation_{day}_{unit.unit_id}")
     check.render_daily_check_button(day)
 
 

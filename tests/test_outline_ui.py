@@ -1,4 +1,5 @@
 from html import escape
+import threading
 from unittest.mock import patch
 
 from tests.test_pdf_preview import button, previewed_pdf
@@ -31,11 +32,16 @@ class MaterialStepTests(UITestCase):
         self.assertIn("To continue, add your OpenAI API key.", [c.value for c in app.caption])
         add_material(app, "First page", "", "Third page")
         self.assertFalse(app.button(key="material_next").disabled)
-        # Nothing is sent to the model before the learner moves on.
-        self.generate.assert_not_called()
+        # The topics are listed in the background as soon as there are a key and a PDF.
+        self.assertIn("outline_job", app.session_state)
         app.button(key="material_next").click().run()
         self.assertEqual(app.session_state["setup_step"], 2)
-        self.generate.assert_called_once()
+        self.assertIn("Loops", app.main.container("outline_panel").html[0].value)
+        # Coming back to Topics does not ask again.
+        calls = self.generate.call_count
+        go_to_step(app, 1)
+        go_to_step(app, 2)
+        self.assertEqual(self.generate.call_count, calls)
         self.assertIn("✓ Material", labels(app))
         self.assertFalse(app.exception)
 
@@ -125,6 +131,35 @@ class OutlineUITests(UITestCase):
         self.assertEqual(generate.call_count, 2)
         self.assertFalse(self.app.error)
         self.assertIn("Page 2", labels(self.app))
+
+    @patch("tutor.materials.outline.generate_outline")
+    def test_topics_found_so_far_are_shown_while_the_rest_is_read(self, generate):
+        self.enterContext(patch("tutor.ui.units.start_planning"))
+        rest_read = threading.Event()
+
+        def slow(pages, on_progress):
+            on_progress([self.topic], 1, 2)
+            rest_read.wait(5)
+            return self.outline
+
+        generate.side_effect = slow
+        # Not `begin`, which waits for the outline.
+        add_material(self.app, "Course introduction", "Running totals")
+        self.app.button(key="material_next").click().run()
+        try:
+            progress = "\n".join(h.value for h in self.app.html)
+            self.assertIn("The tutor is reading your PDF", progress)
+            self.assertIn("Read 1 of 2 parts of your PDF", progress)
+            self.assertIn(f"1. {escape(self.topic.title)}", progress)
+            # Marking topics waits until all are listed; going back is possible.
+            self.assertFalse(self.app.checkbox)
+            self.assertIn("← Back", labels(self.app))
+        finally:
+            rest_read.set()
+        self.app.run()
+        self.assertIn(self.topic.title, self.app.main.container("outline_panel").html[0].value)
+        self.assertTrue(self.app.checkbox)
+        generate.assert_called_once()
 
     @patch("tutor.materials.outline.generate_outline")
     def test_without_a_key_the_outline_waits_for_it(self, generate):

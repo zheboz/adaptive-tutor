@@ -69,22 +69,51 @@ def _card(assignment: StudyAssignment) -> cards.UnitCard | str:
     return entry
 
 
-def render_card(assignment: StudyAssignment, pages: Sequence[PdfPage], key: str) -> None:
-    """The unit's knowledge points: explanation, details, the page, and the quote behind them."""
+# Each knowledge point has a color: its note beside the PDF, and its highlight on the page.
+NOTE_COLORS = 6
+
+
+def color_of(number: int) -> int:
+    return (number - 1) % NOTE_COLORS
+
+
+def day_highlights(day: StudyDay) -> list[tuple[str, str, int]]:
+    """The page, quote and color of each knowledge point of the day whose card is ready, numbered as
+    `render_card` numbers them. Never waits for a card."""
+    highlights = []
+    number = 0
+    for assignment in day.assignments:
+        entry = _store().get(_key(assignment))
+        if isinstance(entry, Future) and entry.done() and entry.exception() is None:
+            entry = entry.result()
+        if isinstance(entry, cards.UnitCard):
+            for point in entry.points:
+                number += 1
+                highlights.append((point.source_id, point.quote, color_of(number)))
+    return highlights
+
+
+def render_card(assignment: StudyAssignment, pages: Sequence[PdfPage], key: str, first: int = 1) -> int:
+    """The unit's knowledge points as notes: explanation, details, the page, and the quote behind
+    them, highlighted on the page in the note's color. Numbers them from `first`; returns the next."""
     _submit(assignment, pages)
     card = _card(assignment)
     if isinstance(card, str):
         st.warning(f"The knowledge points could not be prepared. {card}")
         st.button("Try again", key=f"{key}_retry", on_click=_forget, args=(_key(assignment),))
-        return
+        return first
     if not card.points:
         st.caption(card.problem or "No knowledge points for these pages.")
-        return
-    for number, point in enumerate(card.points, start=1):
-        with st.container(border=True, key=f"{key}_point_{number}"):
+        return first
+    for number, point in enumerate(card.points, start=first):
+        # The key's ending picks the note's color in the layout CSS.
+        with st.container(key=f"{key}_point_{number - first + 1}_note{color_of(number)}", gap="xsmall"):
             details = "".join(f"<li>{escape(detail)}</li>" for detail in point.details)
-            st.html(f"<p><strong>{number}. {escape(point.title)}</strong><br>{escape(point.explanation)}</p>"
+            st.html(f'<p class="note-title"><span class="note-number">{number}</span>'
+                    f"<strong>{escape(point.title)}</strong></p><p>{escape(point.explanation)}</p>"
                     + (f"<ul>{details}</ul>" if details else ""))
-            with st.expander(f"From page {point.source_id[1:]}"):
-                st.caption(f"“{point.quote}”")
-            render_sources([point.source_id], f"{key}_point_{number}")
+            with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+                render_sources([point.source_id], f"{key}_point_{number - first + 1}")
+                with st.expander(f"From page {point.source_id[1:]}"):
+                    st.caption(f"“{point.quote}”")
+    return first + len(card.points)

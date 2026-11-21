@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import streamlit as st
 from streamlit_pdf_viewer import pdf_viewer
 
+from tutor.materials import highlights as layout
 from tutor.materials.ingest import PdfPage
 
 
@@ -13,6 +14,40 @@ _ARROW_WIDTH = 40
 _WINDOW_KEY = "page_window"
 _MODE_KEY = "reader_mode"
 READER_KEYS = ("pdf_page_number", _WINDOW_KEY, _MODE_KEY)
+
+
+# Highlighter colors, in the order of the knowledge-point notes' colors (see cards.NOTE_COLORS).
+HIGHLIGHT_COLORS = (
+    "rgba(255, 200, 0, 0.45)", "rgba(66, 150, 255, 0.40)", "rgba(255, 80, 145, 0.36)",
+    "rgba(40, 190, 110, 0.40)", "rgba(255, 135, 0, 0.40)", "rgba(140, 95, 255, 0.36)",
+)
+
+
+@st.cache_data(max_entries=256, show_spinner=False)
+def _page_lines(pdf_id: str, _pdf: bytes, number: int) -> layout.PageLines:
+    return layout.page_lines(_pdf, number)
+
+
+def _annotations(pdf: bytes, pdf_id: str, number: int,
+                 marks: Sequence[tuple[str, str, int]]) -> tuple[list[dict], float]:
+    """Highlights for the quotes on this page, and the marker's thickness.
+
+    The viewer only draws outlines, so each highlight is a box of no height, along the middle of
+    the line, with an outline half a line thick: the outline fills the line like a marker."""
+    lines = _page_lines(pdf_id, pdf, number)
+    found = [(box, color) for source_id, quote, color in marks if source_id == f"p{number}"
+             for box in layout.quote_boxes(lines, quote)]
+    if not found:
+        return [], 1
+    heights = sorted(box.height for box, _ in found)
+    half = round(heights[len(heights) // 2] / 2, 1)
+    annotations = [
+        {"id": f"mark_{index}", "page": number, "x": box.x + half, "y": box.y + box.height / 2,
+         "width": max(box.width - 2 * half, 0), "height": 0,
+         "color": HIGHLIGHT_COLORS[color % len(HIGHLIGHT_COLORS)], "border": "solid"}
+        for index, (box, color) in enumerate(found)
+    ]
+    return annotations, half
 
 
 def show_page(number: int) -> None:
@@ -34,9 +69,12 @@ def _render_page_text(page: PdfPage, height: int) -> None:
             st.info("No selectable text on this page. It may be blank or scanned. Scanned pages need OCR.")
 
 
-def render_pdf_preview(pdf: bytes, pdf_id: str, pages: Sequence[PdfPage]) -> PdfPage:
+def render_pdf_preview(pdf: bytes, pdf_id: str, pages: Sequence[PdfPage],
+                       marks: Sequence[tuple[str, str, int]] = ()) -> PdfPage:
     """The page, or the text read from it, with the page controls below, in one panel as tall as the
-    panel beside it; both fill the window's height (see the layout CSS in app.py)."""
+    panel beside it; both fill the window's height (see the layout CSS in app.py).
+
+    `marks` are (page id, quote, color) to highlight where they are on the page."""
     count = len(pages)
     page = pages[st.session_state.get("pdf_page_number", 1) - 1]
     with st.container(key="pdf_preview_panel", height=READER_PANEL_HEIGHT, border=True, gap="xsmall"):
@@ -44,8 +82,10 @@ def render_pdf_preview(pdf: bytes, pdf_id: str, pages: Sequence[PdfPage]) -> Pdf
             _render_page_text(page, READER_PANEL_HEIGHT - 72)
         else:
             # The whole page at the panel's width; it scrolls inside the panel when taller.
+            annotations, thickness = _annotations(pdf, pdf_id, page.number, marks)
             with st.container(key="pdf_page_view", height=READER_PANEL_HEIGHT - 72, border=False):
                 pdf_viewer(pdf, pages_to_render=[page.number], render_text=True, zoom_level="auto",
+                           annotations=annotations, annotation_outline_size=thickness,
                            key=f"original_pdf_{pdf_id}_{page.number}")
         with st.container(key="pdf_page_controls", horizontal=True, horizontal_alignment="center", gap=4):
             st.button(

@@ -48,19 +48,22 @@ def render_step_bar(step: int) -> None:
 
 
 def render(step: int) -> None:
+    # The steps are tabs on top of a sheet of paper that holds the open step (see app.py's layout CSS).
     with st.container(key="wizard"):
         render_step_bar(step)
-        if step == 1:
-            _material()
-            return
-        pages = material.pages()
-        result = material.prepare_outline(pages, settings.current_key() is not None)
-        if step == 2:
-            _topics(pages, result)
-        elif step == 3:
-            _quick_check(pages, result)
-        else:
-            _plan(result)
+        with st.container(key="wizard_sheet"):
+            st.html(f'<p class="wizard-kicker">Step {step} of {len(SETUP_STEPS)}</p>')
+            if step == 1:
+                _material()
+                return
+            pages = material.pages()
+            result = material.prepare_outline(pages, settings.current_key() is not None)
+            if step == 2:
+                _topics(pages, result)
+            elif step == 3:
+                _quick_check(pages, result)
+            else:
+                _plan(result)
 
 
 def _back(step: int) -> None:
@@ -87,6 +90,12 @@ def _material() -> None:
             name = st.session_state.pdf_name
             st.success(f"{name} · {len(pages)} page{'s' if len(pages) != 1 else ''}, "
                        f"{material.readable(pages)} with readable text")
+            # The topics are listed in the background while the learner finishes this step.
+            material.start_outline(pages, settings.current_key() is not None)
+            if material.outline_running():
+                st.caption("The tutor has started reading it and listing its topics.")
+            elif material.current_outline() is not None:
+                st.caption("Its topics are ready.")
             if st.session_state.get(material.UPLOAD_KEY) is None:
                 st.caption("Choose another PDF above to replace it.")
     has_key = settings.current_key() is not None
@@ -100,6 +109,10 @@ def _material() -> None:
 
 def _topics(pages: list[PdfPage], result: Outline | None) -> None:
     st.header("Which topics are unclear to you?", anchor=False)
+    if result is None and material.outline_running():
+        material.render_outline_progress(len(pages))
+        _back(1)
+        return
     if result is None:
         material.render_outline_status(pages, settings.current_key() is not None)
         _back(1)

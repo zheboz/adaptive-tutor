@@ -1,6 +1,7 @@
 """The study workspace, once the plan exists: Today, Plan and Progress.
 
-Today puts the PDF beside the open day's material, or beside the chat. The daily check takes the
+Today is laid out like a notebook: the days as tabs, the PDF with today's knowledge points
+highlighted, and beside it the day's notes in the same colors, or the chat. The daily check takes the
 whole width and hides the PDF, so answers come from what was learned; its page links open a window.
 Plan and Progress take the whole width too.
 """
@@ -12,7 +13,7 @@ import streamlit as st
 import tutor.planning as planning
 from tutor.materials.ingest import PdfPage
 from tutor.materials.outline import Outline
-from tutor.ui import check, learner, navigation, tutor_chat, views
+from tutor.ui import cards, check, learner, navigation, tutor_chat, views
 from tutor.ui.citations import links_open_in_reader
 from tutor.ui.reader import READER_PANEL_HEIGHT, render_pdf_preview
 
@@ -53,14 +54,15 @@ def _today(units, result: Outline, pages: Sequence[PdfPage], pdf: tuple[bytes, s
         return
     days = st.session_state.study_plan
     done = check.completed_days()
-    with st.container(key="day_strip", horizontal=True, vertical_alignment="center"):
+    # A notebook: the days as tabs down the left, the page in the middle, the day's notes on the right.
+    tabs_column, reader_column, panel_column = st.columns([1.4, 6, 4.4], gap="medium")
+    with tabs_column, st.container(key="day_strip", gap="small"):
+        st.html('<p class="notebook-label">Plan</p>')
         day = navigation.render_day_picker(max(st.session_state.planned_days, len(days)),
                                            views.day_label(days, done))
-        st.caption(f"{len(done)} of {len(days)} days checked · ✓ checked · ↻ review")
-    reader_column, panel_column = st.columns(2, gap="medium")
-    with reader_column:
-        render_pdf_preview(*pdf[:2], pages)
-    with panel_column, st.container(height=READER_PANEL_HEIGHT, border=True, key="today_panel"):
+        st.caption(f"{len(done)} of {len(days)} days checked  \n✓ checked · ↻ review")
+    # The notes first: the page highlights the knowledge points they show.
+    with panel_column, st.container(height=READER_PANEL_HEIGHT, border=False, key="today_panel"):
         panel = navigation.render_panel_picker()
         with links_open_in_reader():
             if panel == "Study":
@@ -68,6 +70,9 @@ def _today(units, result: Outline, pages: Sequence[PdfPage], pdf: tuple[bytes, s
                     views.render_study_day(units, pages, day)
             else:
                 tutor_chat.render_tutor_chat(pages, result, _CONTENT_HEIGHT - 70)
+    marks = cards.day_highlights(days[day - 1]) if day <= len(days) else []
+    with reader_column:
+        render_pdf_preview(*pdf[:2], pages, marks)
 
 
 def _change_plan(units, result: Outline) -> None:
