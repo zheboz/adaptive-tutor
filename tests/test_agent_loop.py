@@ -88,6 +88,19 @@ class DiagnosisLoopTests(unittest.TestCase):
         self.enterContext(patch("tutor.agent.loop.call_with_tools", side_effect=model))
         return model
 
+    def test_first_question_can_use_current_evidence_without_a_lookup(self):
+        self.state.apply_report(["unit-3"])
+        self.state.record("unit-1:q1", "unit-1", "multiple_choice", True, "quiz")
+        model = self.script(turn("ask_question", 1, unit_id="unit-3", reason="The learner reported loops."))
+
+        self.assertIsInstance(advance(self.session), Ask)
+        self.assertEqual(len(model.seen), 1)
+        state = json.loads(model.seen[0][0]["content"])["learner_state"]
+        self.assertEqual((state["questions_asked"], state["questions_left"]), (0, MAX_QUESTIONS))
+        self.assertEqual(state["units"][0]["answers"][0]["question_id"], "unit-1:q1")
+        self.assertEqual(state["units"][0]["unused_questions"], 2)
+        self.assertEqual(state["units"][2]["status"], "suspected")
+
     def test_follows_a_reported_difficulty_back_to_an_earlier_unit(self):
         self.state.apply_report(["unit-3"])
         model = self.script(
@@ -105,6 +118,7 @@ class DiagnosisLoopTests(unittest.TestCase):
         self.assertEqual((step.question.unit_id, step.reason, step.number), ("unit-3", "The learner reported loops.", 1))
         opening = json.loads(model.seen[0][0]["content"])
         self.assertEqual([u["unit_id"] for u in opening["units_in_study_order"]], ["unit-1", "unit-2", "unit-3"])
+        self.assertEqual(opening["learner_state"], model.outputs()[0])
         self.assertEqual(model.outputs()[0]["units"][2]["status"], "suspected")
         self.assertEqual(model.outputs()[0]["units"][2]["unused_questions"], 3)
 

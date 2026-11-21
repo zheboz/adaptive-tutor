@@ -83,7 +83,7 @@ To go straight to the plan, select **Skip the quiz** instead. Nothing is graded,
 
 **Ask the tutor** is available as soon as a PDF is uploaded. Type a question about the material and the tutor answers from your PDF only (agentic RAG):
 
-- It decides what to search for, tries other wording or reads a page when the first search misses, and uses at most three searches per question. Code fragments such as `x = x + 1` are matched word for word.
+- The app searches the PDF with your question before the tutor’s first reply. If those passages are insufficient, the tutor can try up to three searches of its own or read a full page. Code fragments such as `x = x + 1` are matched word for word.
 - Every answer quotes the pages it relies on. The app checks that each quote appears on the cited page and that the tutor retrieved that page for this question; select a page link to open it beside the chat.
 - When the material doesn't cover the question, the tutor says so and names the missing topic instead of answering from general knowledge.
 - It knows today's study units and the topics you marked as weak, and remembers the last few questions for follow-ups. The caption under the chat shows the model calls and tokens used so far.

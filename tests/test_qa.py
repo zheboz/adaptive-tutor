@@ -49,22 +49,22 @@ class AskTests(unittest.TestCase):
         self.enterContext(patch("tutor.agent.qa.call_with_tools", side_effect=model))
         return model
 
-    def test_searches_then_answers_with_a_checked_quote(self):
+    def test_first_model_call_can_answer_from_initial_passages_with_a_checked_quote(self):
         model = self.script(
-            turn("search_material", 1, query="x = x + 1"),
-            turn("answer", 2, text="It takes the old value of x and adds one.",
+            turn("answer", 1, text="It takes the old value of x and adds one.",
                  citations=[{"page": "p2", "quote": QUOTE.upper()}]),
         )
-        reply = ask(self.session, "  What does x = x + 1   do? ", {"study_day": 2, "weak_topics": ["Updating"]})
+        reply = ask(self.session, "  Explain the   updating statement. ", {"study_day": 2, "weak_topics": ["Updating"]})
         self.assertEqual(reply.kind, "answer")
         self.assertEqual(reply.citations, (Citation("p2", QUOTE.upper()),))
         first = json.loads(model.seen[0][0]["content"])
-        self.assertEqual(first, {"question": "What does x = x + 1 do?",
-                                 "context": {"study_day": 2, "weak_topics": ["Updating"]}})
-        self.assertEqual(model.outputs()[0]["results"][0]["page"], "p2")
-        self.assertEqual(self.session.log, [("What does x = x + 1 do?", reply)])
+        self.assertEqual(first, {"question": "Explain the updating statement.",
+                                 "context": {"study_day": 2, "weak_topics": ["Updating"]},
+                                 "initial_passages": [{"page": "p2", "text": PAGES[1].text}]})
+        self.assertEqual(len(model.seen), 1)
+        self.assertEqual(self.session.log, [("Explain the updating statement.", reply)])
         spans = [span.name for span in self.session.trace.spans]
-        self.assertEqual(spans, ["tool:search_material", "tool:answer"])
+        self.assertEqual(spans, ["retrieval:initial_search", "tool:answer"])
 
     def test_accepts_a_sentence_from_one_column_of_an_interleaved_slide(self):
         # Extracted text reads a two-column slide line by line across both columns.
@@ -87,7 +87,7 @@ class AskTests(unittest.TestCase):
             turn("answer", 5, text="Loops repeat.", citations=[]),
             turn("answer", 6, text="Loops repeat.", citations=[{"page": "p4", "quote": "runs its body 3 times"}]),
         )
-        reply = ask(self.session, "How many times does the loop run?")
+        reply = ask(self.session, "Explain repetition.")
         errors = [o.get("error", "") for o in model.outputs() if "error" in o]
         self.assertIn("was not retrieved", errors[0])
         self.assertIn("not on p4", errors[1])
@@ -98,28 +98,34 @@ class AskTests(unittest.TestCase):
     def test_declines_only_after_searching(self):
         model = self.script(
             turn("cannot_answer", 1, reason="Not covered.", missing_topic="recursion"),
-            turn("search_material", 2, query="recursion function calls itself"),
-            turn("cannot_answer", 3, reason="The notes never mention recursion.", missing_topic="recursion"),
+            turn("search_material", 2, query="What is recursion?"),
+            turn("cannot_answer", 3, reason="Not covered.", missing_topic="recursion"),
+            turn("search_material", 4, query="recursion function calls itself"),
+            turn("cannot_answer", 5, reason="The notes never mention recursion.", missing_topic="recursion"),
         )
         reply = ask(self.session, "What is recursion?")
-        self.assertIn("Search the material before", model.outputs()[0]["error"])
-        self.assertEqual(model.outputs()[1]["results"], [])
+        outputs = model.outputs()
+        self.assertIn("Search the material with different words", outputs[0]["error"])
+        self.assertIn("already been searched", outputs[1]["error"])
+        self.assertEqual(outputs[2], outputs[0])
+        self.assertEqual(outputs[3]["results"], [])
         self.assertEqual((reply.kind, reply.text, reply.missing_topic),
                          ("declined", "The notes never mention recursion.", "recursion"))
 
     def test_follow_up_questions_see_earlier_turns(self):
         model = self.script(
-            turn("search_material", 1, query="assignment"),
+            turn("answer", 1, text="x holds 2.", citations=[{"page": "p1", "quote": "the variable x holds the value 2"}]),
             turn("answer", 2, text="x holds 2.", citations=[{"page": "p1", "quote": "the variable x holds the value 2"}]),
             turn("search_material", 3, query="updating"),
             turn("answer", 4, text="Then it becomes 3.", citations=[{"page": "p2", "quote": QUOTE}]),
         )
-        ask(self.session, "What does x hold after x = 2?")
-        ask(self.session, "And after x = x + 1?")
-        history = model.seen[2][:2]
-        self.assertEqual(history, [{"role": "user", "content": "What does x hold after x = 2?"},
+        ask(self.session, "What does the assignment do?")
+        ask(self.session, "And with x = x + 1?")
+        history = model.seen[1][:2]
+        self.assertEqual(history, [{"role": "user", "content": "What does the assignment do?"},
                                    {"role": "assistant", "content": "x holds 2."}])
-        # Pages retrieved for an earlier question cannot be cited without retrieving them again.
+        self.assertIn("was not retrieved", model.outputs()[0]["error"])
+        self.assertEqual(self.session.log[-1][1].citations, (Citation("p2", QUOTE),))
         self.assertEqual(len(self.session.log), 2)
 
     def test_gives_up_at_the_call_limit_and_surfaces_outages(self):
