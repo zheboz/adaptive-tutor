@@ -124,7 +124,9 @@ class QuizUITests(UITestCase):
         self.app.button(key="quiz_submit").click().run()
         text = self.text()
         self.assertIn("Question 1 · Loops: Not quite.", text)
-        self.assertIn("Correct answer: 2", text)
+        self.assertIn('<span class="answer-label">Correct answer</span><span class="answer-value">2</span>', text)
+        self.assertIn('<div class="answer-row wrong">', text)
+        self.assertIn('<span class="answer-label">Your answer</span><span class="answer-value">3</span>', text)
         self.assertIn("In your material, page 3: “The loops rule.”", text)
         self.assertFalse(self.panel().radio)
         # The source page opens in a window; the check stays where it was.

@@ -3,7 +3,8 @@ from unittest.mock import patch
 
 from tests.test_pdf_preview import button, previewed_pdf
 from tests.ui_helpers import (
-    UITestCase, begin, create_plan, go_to_step, labels, metrics, open_day, show_page, show_panel, visible_text,
+    UITestCase, begin, create_plan, go_to_step, labels, metrics, open_day, plan_days, show_page, show_panel,
+    visible_text,
 )
 from tutor.llm import LLMError
 from tutor.materials.outline import Outline, Topic
@@ -42,12 +43,12 @@ class PlanningUITests(UITestCase):
         target = app.number_input(key="study_target_days")
         self.assertEqual(target.value, 7)
         self.assertIn("2 learning units over 7 days.", [c.value for c in app.caption])
-        rows = app.dataframe[0].value.to_dict("records")
+        rows = plan_days(app)
         self.assertEqual(len(rows), 7)
         self.assertEqual(rows[-1]["Study"], "Optional review")
         # The preview follows the number of days at once, with no model call.
         target.set_value(2).run()
-        rows = app.dataframe[0].value.to_dict("records")
+        rows = plan_days(app)
         self.assertEqual([r["Study"] for r in rows], ["Study: Read an assignment", "Study: Follow the loop"])
         self.assertEqual(self.model.call_count, 2)
         self.assertNotIn("planned_days", app.session_state)
@@ -130,7 +131,7 @@ class PlanningUITests(UITestCase):
         show_page(app, "Plan")
         self.assertEqual(metrics(app)["Goal"], "5 days")
         self.assertEqual(metrics(app)["Plan"], "4 days")
-        self.assertEqual([row["Day"] for row in app.dataframe[0].value.to_dict("records")], [1, 2, 3, 4, 5])
+        self.assertEqual([row["Day"] for row in plan_days(app)], [1, 2, 3, 4, 5])
 
         create_plan(app, 10)
         ten_days = app.session_state["study_plan"]

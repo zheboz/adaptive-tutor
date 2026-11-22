@@ -42,6 +42,45 @@ def day_label(days: Sequence[StudyDay], done: set[int]):
     return label
 
 
+def day_states(days: Sequence[StudyDay], done: set[int], last_day: int) -> list[str]:
+    """How each day from 1 to `last_day` stands: checked, a review still to do, the day to study next,
+    a day still to come, or an optional day past the plan."""
+    next_day = next((day.number for day in days if day.number not in done), None)
+    states = []
+    for number in range(1, last_day + 1):
+        if number > len(days):
+            states.append("optional")
+        elif number in done:
+            states.append("checked")
+        elif any(a.kind == "review" for a in days[number - 1].assignments):
+            states.append("review")
+        else:
+            states.append("next" if number == next_day else "todo")
+    return states
+
+
+def day_strip_html(states: Sequence[str]) -> str:
+    """Colors each day's tab by its state, as the plan's timeline does, and says what the colors mean.
+    The tabs cannot carry a class of their own, so they are picked by position."""
+    rules = "".join(
+        f'.st-key-day_strip [role="radiogroup"] > button:nth-child({number}) {{ {_DAY_TAB_STYLES[state]} }}'
+        for number, state in enumerate(states, start=1) if state != "todo"
+    )
+    legend = "".join(
+        f'<span class="day-legend-item"><span class="day-legend-swatch {state}"></span>{name}</span>'
+        for state, name in (("checked", "Checked"), ("next", "Up next"), ("review", "Review"))
+    )
+    return f'<style>{rules}</style><div class="day-legend">{legend}</div>'
+
+
+_DAY_TAB_STYLES = {
+    "checked": "background: #EAF6EF; color: #1F6B3D; border-left-color: #2E9E5B !important;",
+    "next": "background: #FFF8DC; border-left-color: #F2C94C !important;",
+    "review": "background: #FFF1E3; color: #A25A12; border-left-color: #E08A2E !important;",
+    "optional": "background: transparent; color: #6B7485; border-style: dashed !important; border-left-style: solid !important;",
+}
+
+
 def render_study_day(units: Sequence[StudyUnit], pages: Sequence[PdfPage], day: int) -> None:
     """The open study day: each unit's knowledge points, its task and pages, then the check."""
     days = st.session_state.study_plan
@@ -75,25 +114,45 @@ def render_study_day(units: Sequence[StudyUnit], pages: Sequence[PdfPage], day: 
 
 
 def _pages_text(source_ids: Sequence[str]) -> str:
-    numbers = [int(source_id[1:]) for source_id in source_ids]
-    if not numbers:
-        return ""
-    if numbers == list(range(numbers[0], numbers[-1] + 1)) and len(numbers) > 1:
-        return f"{numbers[0]}–{numbers[-1]}"
-    return ", ".join(map(str, numbers))
+    """The page numbers in order, runs of consecutive pages joined: 4–13, 36–40."""
+    runs: list[list[int]] = []
+    for number in sorted({int(source_id[1:]) for source_id in source_ids}):
+        if runs and number == runs[-1][1] + 1:
+            runs[-1][1] = number
+        else:
+            runs.append([number, number])
+    return ", ".join(f"{first}–{last}" if last > first else str(first) for first, last in runs)
 
 
-def plan_rows(days: Sequence[StudyDay], planned_days: int, done: set[int] = frozenset()) -> list[dict]:
-    rows = [
-        {"Day": day.number, "Status": "✓ checked" if day.number in done else "",
-         "Study": " · ".join(f"{a.kind.capitalize()}: {a.unit.title}" for a in day.assignments),
-         "Pages": _pages_text(tuple(dict.fromkeys(p for a in day.assignments for p in a.source_ids)))}
-        for day in days
-    ]
-    if planned_days > len(days):
-        rows += [{"Day": n, "Status": "", "Study": "Optional review", "Pages": ""}
-                 for n in range(len(days) + 1, planned_days + 1)]
-    return rows
+def plan_html(days: Sequence[StudyDay], planned_days: int, done: set[int] = frozenset(),
+              next_day: int | None = None) -> str:
+    """Every day of the plan down a timeline: what it studies and its pages, checked days in green and
+    reviews still to do in orange, the day to study next in yellow. Styled in app.py's layout CSS."""
+    items = []
+    for day in days:
+        review = any(a.kind == "review" for a in day.assignments)
+        state = ("checked" if day.number in done else "review" if review
+                 else "next" if day.number == next_day else "")
+        status = {"checked": '<span class="plan-day-status">✓ Checked</span>',
+                  "next": '<span class="plan-day-status">Up next</span>'}.get(state, "")
+        units = "".join(
+            f'<p class="plan-unit"><span class="plan-kind {a.kind}">{a.kind.capitalize()}</span>'
+            f'<span class="plan-unit-title">{escape(a.unit.title)}</span></p>'
+            for a in day.assignments
+        )
+        pages = _pages_text(tuple(p for a in day.assignments for p in a.source_ids))
+        pages = f'<p class="plan-day-pages">Pages {pages}</p>' if pages else ""
+        items.append(_plan_day(day.number, state, f"{status}</div>{units}{pages}"))
+    items += [_plan_day(n, "optional", '</div><p class="plan-unit">Optional review</p>')
+              for n in range(len(days) + 1, planned_days + 1)]
+    return f'<ol class="plan-days">{"".join(items)}</ol>'
+
+
+def _plan_day(number: int, state: str, rest: str) -> str:
+    marker = "✓" if state == "checked" else str(number)
+    return (f'<li class="plan-day {state}" data-day="{number}"><span class="plan-day-dot">{marker}</span>'
+            f'<div class="plan-day-card"><div class="plan-day-head"><span class="plan-day-title">Day {number}'
+            f"</span>{rest}</div></li>")
 
 
 def more_time_text(units: Sequence[StudyUnit], weak: Sequence[str], outline: Outline | None) -> str:
@@ -106,6 +165,7 @@ def render_plan_overview(units: Sequence[StudyUnit], result: Outline) -> None:
     planned_days = st.session_state.planned_days
     done = check.completed_days()
     to_go = sum(number not in done for number in range(1, len(days) + 1))
+    st.html('<p class="wizard-kicker">Your study plan</p>')
     with st.container(horizontal=True, key="plan_metrics"):
         st.metric("Goal", f"{planned_days} days")
         st.metric("Plan", f"{len(days)} days")
@@ -120,7 +180,8 @@ def render_plan_overview(units: Sequence[StudyUnit], result: Outline) -> None:
         st.caption("More time for: " + more_time_text(units, weak, result))
     if st.session_state.get("quiz_summary"):
         st.caption(f"Quick check: {st.session_state.quiz_summary}")
-    st.dataframe(plan_rows(days, planned_days, done), hide_index=True, key="plan_table")
+    next_day = next((day.number for day in days if day.number not in done), None)
+    st.html(plan_html(days, planned_days, done, next_day))
     check.render_plan_changes()
 
 

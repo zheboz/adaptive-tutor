@@ -1,6 +1,8 @@
 """Driving the app in tests: the setup steps, then the study workspace."""
 
 from concurrent.futures import Future, wait
+from html import unescape
+import re
 import time
 import unittest
 from unittest.mock import patch
@@ -147,3 +149,15 @@ def visible_text(app):
 
 def labels(app) -> list[str]:
     return [b.label for b in app.button]
+
+
+def plan_days(app) -> list[dict]:
+    """The days the plan shows, from the timeline's HTML: number, state and what each one studies."""
+    page = "\n".join(item.value for item in app.html if 'class="plan-days"' in item.value)
+    days = []
+    for state, number, body in re.findall(r'<li class="plan-day ([a-z]*)" data-day="(\d+)">(.*?)</li>', page):
+        units = re.findall(r'<span class="plan-kind [a-z]+">(\w+)</span><span class="plan-unit-title">(.*?)</span>',
+                           body)
+        study = " · ".join(f"{kind}: {unescape(title)}" for kind, title in units) or "Optional review"
+        days.append({"Day": int(number), "State": state, "Study": study})
+    return days
