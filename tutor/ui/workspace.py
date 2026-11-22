@@ -58,9 +58,10 @@ def _today(units, result: Outline, pages: Sequence[PdfPage], pdf: tuple[bytes, s
     tabs_column, reader_column, panel_column = st.columns([1.4, 6, 4.4], gap="medium")
     with tabs_column, st.container(key="day_strip", gap="small"):
         st.html('<p class="notebook-label">Plan</p>')
-        day = navigation.render_day_picker(max(st.session_state.planned_days, len(days)),
-                                           views.day_label(days, done))
-        st.caption(f"{len(done)} of {len(days)} days checked  \n✓ checked · ↻ review")
+        last_day = max(st.session_state.planned_days, len(days))
+        day = navigation.render_day_picker(last_day, views.day_label(days, done))
+        st.caption(f"{len(done)} of {len(days)} days checked")
+        st.html(views.day_strip_html(views.day_states(days, done, last_day)))
     # The notes first: the page highlights the knowledge points they show.
     with panel_column, st.container(height=READER_PANEL_HEIGHT, border=False, key="today_panel"):
         panel = navigation.render_panel_picker()

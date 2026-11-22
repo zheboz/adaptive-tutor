@@ -54,7 +54,7 @@ the heights go on the wrappers. */
     box-shadow: inset 0 4px 0 #F2C94C;
 }
 .st-key-steps button:disabled { background: #EEF1F5; color: #6B7485; opacity: 1; }
-.st-key-wizard_sheet, .st-key-check_panel {
+.st-key-wizard_sheet, .st-key-check_panel, .st-key-plan_overview_panel {
     background-color: #FFFFFF;
     background-image: linear-gradient(90deg, transparent 36px, #F2A7A7 36px, #F2A7A7 38px, transparent 38px);
     padding: 24px 32px 32px 60px;
@@ -182,11 +182,18 @@ the heights go on the wrappers. */
     background: #FFFFFF;
     margin: 0 !important;
 }
+/* The open day is dark; its left edge keeps the color of its state (see views.day_strip_html). */
 .st-key-day_strip [data-testid="stButtonGroup"] button[aria-checked="true"] {
-    background: #1E2430;
-    color: #FFFFFF;
-    border-left-color: #F2C94C !important;
+    background: #1E2430 !important;
+    color: #FFFFFF !important;
+    box-shadow: 0 4px 10px rgba(30, 36, 48, 0.18);
 }
+.day-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.8rem; color: #6B7485; }
+.day-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.day-legend-swatch { width: 10px; height: 10px; border-radius: 3px; }
+.day-legend-swatch.checked { background: #2E9E5B; }
+.day-legend-swatch.next { background: #F2C94C; }
+.day-legend-swatch.review { background: #E08A2E; }
 .st-key-pdf_preview_panel {
     background: #FFFFFF;
     border: none !important;
@@ -296,6 +303,90 @@ the heights go on the wrappers. */
     border-radius: 4px 4px 4px 18px;
     box-shadow: 0 6px 14px rgba(30, 36, 48, 0.10);
     transform: rotate(-0.3deg);
+}
+/* The plan: its numbers on index cards, then the days down a timeline. */
+.st-key-plan_metrics [data-testid="stMetric"] {
+    padding: 12px 16px;
+    background: #FFFFFF;
+    border: 1px solid #DCE1E8;
+    border-top: 4px solid #2457C5;
+    border-radius: 4px;
+    box-shadow: 0 1px 2px rgba(30, 36, 48, 0.06), 0 6px 16px rgba(30, 36, 48, 0.07);
+}
+.st-key-plan_metrics [data-testid="stMetric"]:nth-child(2) { border-top-color: #E0B53A; }
+.st-key-plan_metrics [data-testid="stMetric"]:nth-child(3) { border-top-color: #2E9E5B; }
+.st-key-plan_metrics [data-testid="stMetric"]:nth-child(4) { border-top-color: #F2A7A7; }
+.st-key-plan_metrics [data-testid="stMetricValue"] { font-family: Caveat, cursive; font-size: 2.6rem; font-weight: 700; }
+.plan-days { margin: 8px 0 0; padding: 0; list-style: none; }
+.plan-day { position: relative; display: grid; grid-template-columns: 36px 1fr; gap: 14px; margin: 0 0 10px; }
+/* The line from each day's dot down to the next one. */
+.plan-day:not(:last-child)::after {
+    content: ""; position: absolute; left: 17px; top: 44px; bottom: -18px; width: 2px; background: #DCE1E8;
+}
+.plan-day-dot {
+    z-index: 1; display: flex; align-items: center; justify-content: center;
+    width: 36px; height: 36px; margin-top: 8px; border-radius: 50%;
+    background: #FFFFFF; border: 2px solid #C9D0DA; color: #3E4756; font-weight: 700;
+}
+.plan-day.checked .plan-day-dot { background: #2E9E5B; border-color: #2E9E5B; color: #FFFFFF; }
+.plan-day.next .plan-day-dot { background: #F2C94C; border-color: #E0B53A; color: #1E2430; }
+.plan-day-card {
+    padding: 10px 16px 12px;
+    background: #FFFFFF;
+    border: 1px solid #DCE1E8;
+    border-radius: 4px 4px 4px 14px;
+    box-shadow: 0 1px 2px rgba(30, 36, 48, 0.06);
+}
+.plan-day.checked .plan-day-card { background: #F4FAF6; border-color: #CFE8D8; }
+.plan-day.next .plan-day-card { background: #FFFBEA; border-color: #E0B53A; box-shadow: 0 6px 14px rgba(30, 36, 48, 0.10); }
+.plan-day.review .plan-day-dot { background: #E08A2E; border-color: #E08A2E; color: #FFFFFF; }
+.plan-day.review .plan-day-card { background: #FFF8F1; border-color: #F3D3B0; }
+.plan-day.optional .plan-day-card { background: transparent; border-style: dashed; box-shadow: none; color: #6B7485; }
+.plan-day.optional .plan-day-dot { border-style: dashed; color: #6B7485; }
+.plan-day-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.plan-day-title { font-family: Caveat, cursive; font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+.plan-day-status {
+    padding: 2px 9px; border-radius: 999px;
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.plan-day.checked .plan-day-status { background: #DDF0E4; color: #1F6B3D; }
+.plan-day.next .plan-day-status { background: #F2C94C; color: #1E2430; }
+.plan-unit { display: flex; align-items: baseline; gap: 10px; margin: 3px 0; line-height: 1.45; }
+.plan-kind {
+    flex: none; width: 4.4rem; padding: 1px 0; border-radius: 4px; text-align: center;
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.plan-kind.study { background: #E3ECFB; color: #2457C5; }
+.plan-kind.apply { background: #EDE6FA; color: #5B3BA8; }
+.plan-kind.read { background: #EEF1F5; color: #3E4756; }
+.plan-kind.review { background: #FDEBD8; color: #A25A12; }
+.plan-day-pages { margin: 6px 0 0; font-size: 0.85rem; color: #6B7485; }
+/* The learner's answer and the correct one, marked wrong or right. */
+.answer-rows { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 4px; }
+.answer-row {
+    display: grid;
+    grid-template-columns: 26px 9.5rem 1fr;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border-left: 4px solid;
+    border-radius: 6px;
+    font-size: 1.05rem;
+}
+.answer-row.right { background: #E4F4EA; border-color: #2E9E5B; color: #1F6B3D; }
+.answer-row.wrong { background: #FBE6E4; border-color: #D0473C; color: #8E2A22; }
+.answer-mark {
+    display: flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 50%;
+    color: #FFFFFF; font-size: 0.85rem; font-weight: 700;
+}
+.answer-row.right .answer-mark { background: #2E9E5B; }
+.answer-row.wrong .answer-mark { background: #D0473C; }
+.answer-label { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.answer-value { font-weight: 600; color: #1E2430; }
+@media (max-width: 640px) {
+    .answer-row { grid-template-columns: 26px 1fr; }
+    .answer-value { grid-column: 2; }
 }
 /* The result: a handwritten verdict over ruled lines. */
 .st-key-check_result strong { font-family: Caveat, cursive; font-size: 1.9rem; font-weight: 700; }

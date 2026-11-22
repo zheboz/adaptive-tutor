@@ -200,7 +200,7 @@ def _plan(result: Outline | None) -> None:
     if weak:
         summary += " More time for: " + views.more_time_text(units, weak, result) + "."
     st.caption(summary)
-    st.dataframe(views.plan_rows(plan, days), hide_index=True, key="plan_preview")
+    st.html(views.plan_html(plan, days))
     st.caption("You can change the number of days later on the Plan page. After each study day, a check "
                "may add a review at the end of the plan.")
     with st.container(horizontal=True, key="plan_actions"):

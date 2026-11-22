@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from tests.test_agent_loop import ScriptedModel, turn
 from tests.test_pdf_preview import button, previewed_pdf
-from tests.ui_helpers import (UITestCase, begin, create_plan, metrics, open_day, show_page, visible_text,
+from tests.ui_helpers import (UITestCase, begin, create_plan, metrics, open_day, plan_days, show_page, visible_text,
                                wait_for_jobs)
 from tutor.assessment.questions import InsufficientEvidence, PracticeError, Question
 from tutor.llm import LLMError
@@ -127,7 +127,7 @@ class CheckUITests(UITestCase):
         self.answer(qid("unit-2", 1), "3")
         text = self.text()
         self.assertIn("Question 1 · Updates: Not quite.", text)
-        self.assertIn("Correct answer: 2", text)
+        self.assertIn('<span class="answer-label">Correct answer</span><span class="answer-value">2</span>', text)
         self.answer(qid("unit-2", 2), "2")
         self.answer(qid("unit-2", 3), "2")
         text = self.text()
@@ -162,9 +162,9 @@ class CheckUITests(UITestCase):
         self.assertEqual(metrics(self.app)["Plan"], "4 days")
         self.assertIn("The plan now needs 4 days, 1 more than your goal", overview.warning[0].value)
         self.assertIn("Plan changes (1)", [e.label for e in overview.expander])
-        rows = self.app.dataframe[0].value.to_dict("records")
+        rows = plan_days(self.app)
         self.assertEqual(rows[3]["Study"], "Review: Loops")
-        self.assertEqual([r["Status"] for r in rows], ["✓ checked"] * 3 + [""])
+        self.assertEqual([r["State"] for r in rows], ["checked"] * 3 + ["review"])
         open_day(self.app, 4)
         self.assertIn('<span class="unit-kind">Review</span><p><strong>Loops</strong>', visible_text(self.panel()))
         self.assertEqual(self.app.segmented_control(key="day_picker").options, ["Day 1 ✓", "Day 2 ✓", "Day 3 ✓", "Day 4 ↻"])
