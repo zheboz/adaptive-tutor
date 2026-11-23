@@ -2,6 +2,8 @@
 
 from concurrent.futures import Future, wait
 from html import unescape
+import os
+from pathlib import Path
 import re
 import time
 import unittest
@@ -17,9 +19,12 @@ KEY = "sk-test"
 
 
 class UITestCase(unittest.TestCase):
-    """The learner's models load without a request, and no request ever reaches OpenAI."""
+    """The app has a key from its environment, never the developer's real one; its models load without a
+    request, and no request ever reaches OpenAI."""
 
     def setUp(self):
+        self.env = self.enterContext(patch.dict(os.environ, {"OPENAI_API_KEY": KEY}, clear=True))
+        self.enterContext(patch("tutor.ui.settings.ENV_FILE", Path("/nonexistent/.env")))
         self.list_models = self.enterContext(patch("tutor.ui.settings.list_models", return_value=[]))
         self.enterContext(patch("tutor.llm._request", side_effect=LLMError("No network in tests.")))
         self._apps: list[AppTest] = []
@@ -55,18 +60,16 @@ def _jobs(values) -> list[Future]:
     return found
 
 
-def add_material(app, *pages, key: str | None = KEY) -> bytes:
-    """In the first step: the key, then the PDF."""
-    if key is not None and app.text_input(key="api_key_input").value != key:
-        app.text_input(key="api_key_input").set_value(key).run()
+def add_material(app, *pages) -> bytes:
+    """In the first step: the PDF."""
     document = make_pdf(*pages)
     app.file_uploader[0].set_value(("lesson.pdf", document, "application/pdf")).run()
     return document
 
 
-def begin(app, *pages, key: str | None = KEY) -> bytes:
+def begin(app, *pages) -> bytes:
     """Add the material and open the Topics step, where the outline is made."""
-    document = add_material(app, *pages, key=key)
+    document = add_material(app, *pages)
     app.button(key="material_next").click().run()
     wait_for_outline(app)
     return document

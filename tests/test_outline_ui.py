@@ -16,23 +16,22 @@ class MaterialStepTests(UITestCase):
         self.generate.return_value = Outline(topics=[Topic(title="Loops", summary="Repeat.", source_ids=["p1"])])
         self.app = self.new_app()
 
-    def test_the_first_step_takes_the_key_and_the_pdf_then_opens_topics(self):
+    def test_the_first_step_takes_the_model_and_the_pdf_then_opens_topics(self):
         app = self.app
         self.assertFalse(app.sidebar.children)
         self.assertEqual(app.main.container("material_upload").file_uploader[0].label, "PDF to study")
-        self.assertTrue(app.main.container("material_settings").text_input(key="api_key_input"))
-        # Only the first step can be opened, and Next waits for both the key and the PDF.
+        # The key is the app's own: the learner only picks the model.
+        self.assertTrue(app.main.container("material_settings").selectbox(key="model_choice"))
+        self.assertFalse(app.text_input)
+        # Only the first step can be opened, and Next waits for the PDF.
         self.assertEqual([b.disabled for b in app.main.container("steps").button], [False, True, True, True])
         self.assertTrue(app.button(key="material_next").disabled)
-        self.assertIn("To continue, add your OpenAI API key and a PDF.", [c.value for c in app.caption])
+        self.assertIn("To continue, add a PDF.", [c.value for c in app.caption])
 
-        add_material(app, "First page", "", "Third page", key=None)
-        self.assertIn("lesson.pdf · 3 pages, 2 with readable text", app.success[0].value)
-        self.assertTrue(app.button(key="material_next").disabled)
-        self.assertIn("To continue, add your OpenAI API key.", [c.value for c in app.caption])
         add_material(app, "First page", "", "Third page")
+        self.assertIn("lesson.pdf · 3 pages, 2 with readable text", app.success[0].value)
         self.assertFalse(app.button(key="material_next").disabled)
-        # The topics are listed in the background as soon as there are a key and a PDF.
+        # The topics are listed in the background as soon as there is a PDF.
         self.assertIn("outline_job", app.session_state)
         app.button(key="material_next").click().run()
         self.assertEqual(app.session_state["setup_step"], 2)
@@ -65,7 +64,6 @@ class MaterialStepTests(UITestCase):
         # The upload widget is empty again, but the material is still there.
         self.assertIn("lesson.pdf · 1 page", app.success[0].value)
         self.assertIn("Choose another PDF above to replace it.", [c.value for c in app.caption])
-        self.assertEqual(app.text_input(key="api_key_input").value, "sk-test")
         app.button(key="material_next").click().run()
         self.generate.assert_called_once()
         self.assertIn("Loops", app.main.container("outline_panel").html[0].value)
@@ -162,17 +160,18 @@ class OutlineUITests(UITestCase):
         generate.assert_called_once()
 
     @patch("tutor.materials.outline.generate_outline")
-    def test_without_a_key_the_outline_waits_for_it(self, generate):
-        generate.side_effect = LLMError("Enter your OpenAI API key in the settings to use the tutor.")
-        add_material(self.app, "Course introduction", "Running totals", key=None)
-        # Topics can be opened from the step bar; it says what is missing.
-        go_to_step(self.app, 2)
-        self.assertIn("Enter your OpenAI API key in the settings", self.app.info[0].value)
-        self.assertNotIn("Try again", labels(self.app))
-        self.assertNotIn("outline_error", self.app.session_state)
-        generate.side_effect = None
+    def test_without_a_key_nothing_is_sent_and_the_page_says_how_to_set_one(self, generate):
         generate.return_value = self.outline
-        self.app.text_input(key="api_key_input").set_value("sk-test").run()
-        self.assertIn(self.topic.title, self.app.main.container("outline_panel").html[0].value)
-
-
+        del self.env["OPENAI_API_KEY"]
+        add_material(self.app, "Course introduction", "Running totals")
+        settings = self.app.main.container("material_settings")
+        self.assertIn("No OpenAI API key is set for this app", settings.error[0].value)
+        self.assertTrue(self.app.button(key="material_next").disabled)
+        self.assertNotIn("outline_job", self.app.session_state)
+        generate.assert_not_called()
+        # Once the key is set, the outline starts.
+        self.env["OPENAI_API_KEY"] = "sk-test"
+        self.app.run()
+        self.assertFalse(self.app.error)
+        self.assertFalse(self.app.button(key="material_next").disabled)
+        self.assertIn("outline_job", self.app.session_state)

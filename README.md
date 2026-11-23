@@ -27,7 +27,13 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-The outline, planning, quick check, daily check and tutor features call OpenAI with the key each learner enters in the app; the app has no key of its own. Start the app from the project root:
+The outline, planning, quick check, daily check and tutor features call OpenAI with the app's own key. Put it in a `.env` file at the project root (it is ignored by git), or set it in the environment, which takes precedence:
+
+```bash
+echo 'OPENAI_API_KEY=sk-...' > .env
+```
+
+Then start the app from the project root:
 
 ```bash
 .venv/bin/python -m streamlit run app.py
@@ -41,7 +47,7 @@ The app has two parts: **setup**, four steps taken once for each PDF, then the *
 
 **Setup** fills the page's width and shows one step at a time. The step bar at the top shows where you are (✓ marks a step you have finished) and opens any step you have already reached, so you can go back and change an earlier choice. Each step ends with the button for the next one.
 
-1. **Material**: your OpenAI key, the model, and the PDF to study.
+1. **Material**: the model, and the PDF to study.
 2. **Topics**: the outline of your PDF. Check the topics you don't understand yet.
 3. **Quick check**: a few questions from your pages, one at a time. You can skip it.
 4. **Plan**: choose the number of days and see the plan before you start.
@@ -49,22 +55,22 @@ The app has two parts: **setup**, four steps taken once for each PDF, then the *
 The **study workspace** opens when you select **Start studying**. The bar at the top switches between three pages:
 
 - **Today**: a row of days (✓ a checked day, ↻ a review day) above the PDF. Beside the PDF, **Study** shows the open day's knowledge points, readings and task, and **Ask the tutor** shows the chat. Page links there turn the PDF to that page. Below the PDF, **Page** and **Text** switch between the page itself and the text the tutor reads from it.
-- **Plan**: your goal, the number of days the plan now has and how many you have checked, every day in a table, **Plan changes**, and **Change the plan**.
+- **Plan**: your goal, the number of days the plan now has and how many you have checked, every day down a timeline (checked days in green, the next day in yellow, reviews in orange), **Plan changes**, and **Change the plan**.
 - **Progress**: each unit's status with the evidence behind it, and your quick check answers.
 
-Outside the Today page's PDF, page links open the page in a window, so you never lose your place. **Settings** at the top right holds your key and model after the first step, and **Start over with another PDF**, which clears the outline, the plan and your progress but keeps your key and model.
+Outside the Today page's PDF, page links open the page in a window, so you never lose your place. **Settings** at the top right holds the model after the first step, and **Start over with another PDF**, which clears the outline, the plan and your progress but keeps the model.
 
-### Your OpenAI key and model
+### The OpenAI key and model
 
-Enter your OpenAI API key in the first step. It is hidden as you type, and the eye button in the field shows or hides it. The key is used only in your browser session: it is not saved, not shown to anyone else, and not written to the server's environment, so other people using the same app never use it. After the first step, the key and model are under **Settings**.
+The app reads its key from `OPENAI_API_KEY`: the environment first, then the `.env` file at the project root (on Streamlit Community Cloud, add it as a root-level secret, which Streamlit passes to the environment). Learners never enter or see the key. Every learner using the app spends from this key, so do not share a public deployment's URL widely. Without a key, the first step says how to set one and nothing is sent to OpenAI.
 
-**Model** starts with the default, `gpt-6-luna`, then recommended models from the newest (`gpt-6.2-sol`, `gpt-5.6-luna` and others) down to `gpt-4o-mini`; each was checked with tool calls and structured outputs. Once your key is entered, the list keeps the recommended models your account has and adds its other chat models after them; when your account has no `gpt-6-luna`, the default becomes `gpt-4.1-mini`. **Other…** accepts any model ID. Pro models work but take about 50 seconds a call. The tutor needs a model that supports tool calls and structured outputs; if one fails, switch back to the default. Your key and model apply to everything in your session.
+Learners choose the model in the first step; afterwards it is under **Settings**.
 
-The app never uses a key from the server's environment: without your key, nothing is sent to OpenAI.
+**Model** starts with the default, `gpt-6-luna`, then recommended models from the newest (`gpt-6.2-sol`, `gpt-5.6-luna` and others) down to `gpt-4o-mini`; each was checked with tool calls and structured outputs. Once the key's models are loaded, the list keeps the recommended models the account has and adds its other chat models after them; when the account has no `gpt-6-luna`, the default becomes `gpt-4.1-mini`. **Other…** accepts any model ID. Pro models work but take about 50 seconds a call. The tutor needs a model that supports tool calls and structured outputs; if one fails, switch back to the default. The chosen model applies to everything in your session.
 
 ### Step 1: Material
 
-Enter your key, choose a model, and upload a PDF. The step shows how many pages the PDF has and how many have readable text; a damaged or password-protected PDF is reported here. **Next: review the topics** is available once both the key and the PDF are in. The PDF is kept when you come back to this step; choose another PDF to replace it, which starts over.
+Choose a model and upload a PDF. The step shows how many pages the PDF has and how many have readable text; a damaged or password-protected PDF is reported here. **Next: review the topics** is available once the PDF is in (and the app has a key). The PDF is kept when you come back to this step; choose another PDF to replace it, which starts over.
 
 ### Step 2: Topics
 

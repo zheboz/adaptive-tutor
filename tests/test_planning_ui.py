@@ -167,8 +167,6 @@ class PlanningUITests(UITestCase):
         app.button(key="start_over").click().run()
         self.assert_plan_cleared()
         self.assertEqual(app.session_state["setup_step"], 1)
-        # The key stays.
-        self.assertEqual(app.text_input(key="api_key_input").value, "sk-test")
         begin(app, "Sorting")
         create_plan(app, 20)
         self.assertEqual(app.session_state["unit_plan"], sort_plan)

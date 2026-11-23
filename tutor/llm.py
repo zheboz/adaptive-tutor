@@ -69,14 +69,14 @@ _active_trace: ContextVar[Trace | None] = ContextVar("active_trace", default=Non
 
 @dataclass(frozen=True)
 class Credentials:
-    """The learner's own key and model for this session. The app has no key of its own."""
+    """The key and model for this session's calls. The web app passes the key from its environment."""
 
     api_key: str | None = None
     model: str | None = None
 
 
-# Per-session credentials, entered by the learner. They are never read from or written to the process
-# environment, which every session of the app shares; background threads that copy the context see them.
+# Per-session credentials, passed in by the caller (llm itself never reads the environment, so tests and
+# the evaluation choose their key explicitly); background threads that copy the context see them.
 _active_credentials: ContextVar[Credentials] = ContextVar("active_credentials", default=Credentials())
 
 
