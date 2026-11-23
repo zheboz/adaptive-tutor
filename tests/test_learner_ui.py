@@ -1,9 +1,58 @@
 import re
+import unittest
 from unittest.mock import patch
 
 from tests.ui_helpers import UITestCase, begin, create_plan, show_page, visible_text
+from tutor.agent.state import LearnerState
 from tutor.materials.outline import Outline, Topic
+from tutor.planning import StudyUnit
 from tutor.planning.units import Solution, UnitPlan, UnitStep, UnitTask
+from tutor.ui.learner import chapter_percent, chapter_progress, chapter_progress_html
+
+
+def answer(state, unit_id, *results):
+    for number, correct in enumerate(results, start=1):
+        state.record(f"{unit_id}-q{number}", unit_id, "multiple_choice", correct, "diagnosis")
+
+
+class ChapterProgressTests(unittest.TestCase):
+    def test_units_are_counted_by_how_they_stand(self):
+        units = [StudyUnit(f"unit-{n}", f"Unit {n}", "Learn.", (f"p{n}",), "Do.", (n,)) for n in range(1, 6)]
+        state = LearnerState(units)
+        answer(state, "unit-1", True, True)            # understood
+        answer(state, "unit-2", True)                  # one answer: needs more evidence
+        answer(state, "unit-3", False, False, True)    # likely gap
+        state.apply_report(["unit-4"])                 # marked weak, not checked: not checked yet
+        counts = chapter_progress(state)
+        self.assertEqual(counts, {"understood": 1, "uncertain": 1, "gap": 1, "untested": 2})
+
+        # Understood counts fully, needs more evidence half: (1 + 0.5) of 5 units.
+        self.assertEqual(chapter_percent(counts), 30)
+        html = chapter_progress_html(counts, 2, 6)
+        self.assertIn('<p class="chapter-percent"><span>30%</span> of the chapter learned</p>', html)
+        self.assertIn('aria-valuemax="100" aria-valuenow="30"', html)
+        self.assertIn('class="chapter-bar-part understood" style="width: 20.0000%"', html)
+        self.assertIn('class="chapter-bar-part untested" style="width: 40.0000%"', html)
+        self.assertIn("1 of 5 units understood · 2 of 6 days checked", html)
+
+    def test_the_percentage_weighs_each_unit_by_how_it_stands(self):
+        def percent(understood=0, uncertain=0, gap=0, untested=0):
+            return chapter_percent({"understood": understood, "uncertain": uncertain, "gap": gap,
+                                    "untested": untested})
+        self.assertEqual(percent(understood=4), 100)
+        self.assertEqual(percent(uncertain=4), 50)
+        self.assertEqual(percent(gap=3, untested=1), 0)
+        self.assertEqual(percent(understood=1, uncertain=1, gap=1), 50)
+        self.assertEqual(percent(), 0)
+
+    def test_an_empty_or_untouched_chapter_shows_no_filled_part(self):
+        html = chapter_progress_html({"understood": 0, "uncertain": 0, "gap": 0, "untested": 3}, 0, 4)
+        self.assertIn("<span>0%</span>", html)
+        self.assertNotIn("chapter-bar-part understood", html)
+        self.assertIn("0 of 3 units understood · 0 of 4 days checked", html)
+        html = chapter_progress_html({"understood": 0, "uncertain": 0, "gap": 0, "untested": 0}, 0, 1)
+        self.assertIn("<span>0%</span>", html)
+        self.assertNotIn("chapter-bar-part", html)
 
 
 class LearnerUITests(UITestCase):
@@ -53,6 +102,17 @@ class LearnerUITests(UITestCase):
         kinds = [(a.unit.title, a.kind) for day in self.app.session_state["study_plan"] for a in day.assignments]
         self.assertIn(("Iteration", "review"), kinds)
         self.assertNotIn(("Assignment", "review"), kinds)
+
+    def test_progress_opens_with_the_chapter_bar(self):
+        self.plan(3, 1)
+        show_page(self.app, "Progress")
+        panel = self.app.main.container("progress_panel")
+        chapter = next(h.value for h in panel.html if "chapter-progress" in h.value)
+        self.assertIn("<span>0%</span> of the chapter learned", chapter)
+        self.assertIn("0 of 3 units understood · 0 of 3 days checked", chapter)
+        # The bar comes before each unit's status.
+        texts = [h.value for h in panel.html]
+        self.assertLess(texts.index(chapter), next(i for i, t in enumerate(texts) if "Iteration" in t))
 
     def test_checked_topics_take_effect_when_the_plan_is_created(self):
         self.plan(3, 0, 2)

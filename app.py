@@ -54,7 +54,7 @@ the heights go on the wrappers. */
     box-shadow: inset 0 4px 0 #F2C94C;
 }
 .st-key-steps button:disabled { background: #EEF1F5; color: #6B7485; opacity: 1; }
-.st-key-wizard_sheet, .st-key-check_panel, .st-key-plan_overview_panel {
+.st-key-wizard_sheet, .st-key-check_panel, .st-key-plan_overview_panel, .st-key-progress_panel {
     background-color: #FFFFFF;
     background-image: linear-gradient(90deg, transparent 36px, #F2A7A7 36px, #F2A7A7 38px, transparent 38px);
     padding: 24px 32px 32px 60px;
@@ -194,6 +194,28 @@ the heights go on the wrappers. */
 .day-legend-swatch.checked { background: #2E9E5B; }
 .day-legend-swatch.next { background: #F2C94C; }
 .day-legend-swatch.review { background: #E08A2E; }
+/* Progress: the whole chapter in one large bar, colored by how each unit stands. */
+.chapter-progress { margin: 0 0 1.25rem; }
+.chapter-percent { display: flex; align-items: baseline; gap: 10px; margin: 0.25rem 0 0.6rem; color: #3E4756; }
+.chapter-percent span { font-family: Caveat, cursive; font-size: 3.4rem; font-weight: 700; line-height: 1; color: #1E2430; }
+.chapter-bar {
+    display: flex;
+    height: 26px;
+    overflow: hidden;
+    border-radius: 13px;
+    background: #EEF1F5;
+    box-shadow: inset 0 1px 2px rgba(30, 36, 48, 0.12);
+}
+.chapter-bar-part { height: 100%; }
+.chapter-bar-part + .chapter-bar-part { border-left: 2px solid #FFFFFF; }
+.chapter-bar-part.understood, .chapter-legend-swatch.understood { background: #2E9E5B; }
+.chapter-bar-part.uncertain, .chapter-legend-swatch.uncertain { background: #F2C94C; }
+.chapter-bar-part.gap, .chapter-legend-swatch.gap { background: #E08A2E; }
+.chapter-bar-part.untested, .chapter-legend-swatch.untested { background: #C9D0DA; }
+.chapter-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0.7rem 0 0.4rem; font-size: 0.9rem; color: #3E4756; }
+.chapter-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.chapter-legend-swatch { width: 12px; height: 12px; border-radius: 3px; }
+.chapter-summary { margin: 0; font-size: 0.9rem; color: #6B7485; }
 .st-key-pdf_preview_panel {
     background: #FFFFFF;
     border: none !important;

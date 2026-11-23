@@ -186,5 +186,8 @@ def render_plan_overview(units: Sequence[StudyUnit], result: Outline) -> None:
 
 
 def render_progress(units: Sequence[StudyUnit]) -> None:
+    """The whole chapter's progress in one bar, then each unit's status and the quick check."""
+    days = st.session_state.study_plan
+    learner.render_chapter_progress(units, len(check.completed_days()), len(days))
     learner.render_learning_status(units)
     quiz.render_quiz_review()

@@ -92,6 +92,69 @@ def _evidence_text(evidence) -> str:
     return " · ".join(parts) or "No answers yet"
 
 
+# The chapter bar's segments, in order: what is settled first, what is still open last.
+PROGRESS_SEGMENTS = (
+    ("understood", "Understood", ("mastered",)),
+    ("uncertain", "Needs more evidence", ("uncertain",)),
+    ("gap", "Likely gap", ("gap",)),
+    ("untested", "Not checked yet", ("untested", "suspected")),
+)
+
+
+# How much each segment's units count toward the chapter's percentage: an understood unit fully, one
+# that needs more evidence half; a likely gap or an unchecked unit not yet.
+PROGRESS_WEIGHTS = {"understood": 1.0, "uncertain": 0.5, "gap": 0.0, "untested": 0.0}
+
+
+def chapter_progress(state: LearnerState) -> dict[str, int]:
+    """How many of the chapter's units are in each segment of the progress bar."""
+    statuses = [evidence.status for evidence in state.units.values()]
+    return {name: sum(status in members for status in statuses) for name, _, members in PROGRESS_SEGMENTS}
+
+
+def chapter_percent(counts: dict[str, int]) -> int:
+    """The chapter's progress in percent, each unit weighted by how it stands (see PROGRESS_WEIGHTS)."""
+    total = sum(counts.values())
+    if not total:
+        return 0
+    return round(100 * sum(PROGRESS_WEIGHTS[name] * count for name, count in counts.items()) / total)
+
+
+def chapter_progress_html(counts: dict[str, int], days_checked: int, plan_days: int) -> str:
+    """One large bar for the whole chapter: its weighted percentage, and how each unit stands.
+    Styled in app.py's layout CSS."""
+    total = sum(counts.values())
+    understood = counts["understood"]
+    percent = chapter_percent(counts)
+    segments = "".join(
+        f'<span class="chapter-bar-part {name}" style="width: {100 * counts[name] / total:.4f}%" '
+        f'title="{label}: {counts[name]}"></span>'
+        for name, label, _ in PROGRESS_SEGMENTS if total and counts[name]
+    )
+    legend = "".join(
+        f'<span class="chapter-legend-item"><span class="chapter-legend-swatch {name}"></span>'
+        f"{label} <strong>{counts[name]}</strong></span>"
+        for name, label, _ in PROGRESS_SEGMENTS
+    )
+    return (
+        '<div class="chapter-progress">'
+        '<p class="wizard-kicker">Chapter progress</p>'
+        f'<p class="chapter-percent"><span>{percent}%</span> of the chapter learned</p>'
+        f'<div class="chapter-bar" role="progressbar" aria-label="Chapter progress" aria-valuemin="0" '
+        f'aria-valuemax="100" aria-valuenow="{percent}">{segments}</div>'
+        f'<div class="chapter-legend">{legend}</div>'
+        f'<p class="chapter-summary">{understood} of {total} unit{"s" if total != 1 else ""} understood · '
+        f'{days_checked} of {plan_days} day{"s" if plan_days != 1 else ""} checked</p>'
+        '<p class="chapter-summary">Understood units count fully and units that need more evidence count '
+        "half.</p>"
+        "</div>"
+    )
+
+
+def render_chapter_progress(units: Sequence[StudyUnit], days_checked: int, plan_days: int) -> None:
+    st.html(chapter_progress_html(chapter_progress(learner_state(units)), days_checked, plan_days))
+
+
 def render_learning_status(units: Sequence[StudyUnit]) -> None:
     state = learner_state(units)
     with st.container(key="learning_status_panel"):
