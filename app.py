@@ -462,13 +462,13 @@ def render_header(studying: bool, setup_step: int) -> str | None:
         st.markdown(f"**Adaptive Tutor**{f' · {name}' if name and setup_step != 1 else ''}")
         if studying:
             page = navigation.render_page_picker()
-        # In the first step the key and model are on the page itself.
+        # In the first step the model is on the page itself.
         if setup_step != 1:
             with st.popover("Settings", icon=":material/settings:"):
                 settings.render_settings()
                 st.divider()
                 st.button("Start over with another PDF", key="start_over", on_click=material.start_over,
-                          help="Clears the outline, the plan and your progress. Your key and model stay.")
+                          help="Clears the outline, the plan and your progress. The model stays.")
     return page
 
 
@@ -478,8 +478,8 @@ def main() -> None:
     studying = st.session_state.get("planned_days") is not None and material.pages() is not None
     step = 0 if studying else wizard.current()
     page = render_header(studying, step)
-    # Every model call in this run, including those in background threads, uses this session's
-    # key and model.
+    # Every model call in this run, including those in background threads, uses the app's key and
+    # this session's model.
     with llm.using(settings.current_key(), settings.current_model()):
         if studying:
             workspace.render(page, material.current_outline(), material.pages(), material.pdf())

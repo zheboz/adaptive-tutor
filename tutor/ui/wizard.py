@@ -75,10 +75,8 @@ def _material() -> None:
     st.caption("The tutor reads your PDF, lists its topics, checks what you already know, and plans your "
                "study days from it.")
     with st.container(border=True, key="material_settings"):
-        st.markdown("**Your OpenAI key and model**")
+        st.markdown("**The OpenAI model**")
         settings.render_settings(horizontal=True)
-        st.caption("Your key is used only in this browser session to call OpenAI. It is not saved, and "
-                   "nobody else using the app can use it.")
     with st.container(border=True, key="material_upload"):
         st.markdown("**The PDF to study**")
         st.file_uploader("PDF to study", type=["pdf"], key=material.UPLOAD_KEY, on_change=material.keep_upload,
@@ -99,12 +97,10 @@ def _material() -> None:
             if st.session_state.get(material.UPLOAD_KEY) is None:
                 st.caption("Choose another PDF above to replace it.")
     has_key = settings.current_key() is not None
-    missing = [what for what, there in (("your OpenAI API key", has_key), ("a PDF", pages is not None))
-               if not there]
-    st.button("Next: review the topics →", key="material_next", type="primary", disabled=bool(missing),
-              on_click=go_to_step, args=(2,))
-    if missing:
-        st.caption(f"To continue, add {' and '.join(missing)}.")
+    st.button("Next: review the topics →", key="material_next", type="primary",
+              disabled=not has_key or pages is None, on_click=go_to_step, args=(2,))
+    if has_key and pages is None:
+        st.caption("To continue, add a PDF.")
 
 
 def _topics(pages: list[PdfPage], result: Outline | None) -> None:

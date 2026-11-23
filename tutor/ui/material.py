@@ -15,7 +15,7 @@ import streamlit as st
 from tutor.llm import LLMError
 from tutor.materials import outline
 from tutor.materials.ingest import PdfInputError, PdfPage, read_pdf_pages
-from tutor.ui import cards, check, learner, navigation, quiz, units
+from tutor.ui import cards, check, learner, navigation, quiz, settings, units
 from tutor.ui.reader import READER_KEYS
 
 
@@ -35,7 +35,7 @@ _STUDY_KEYS = (
 
 
 def reset() -> None:
-    """Forget the material and everything made from it; the learner's key and model stay."""
+    """Forget the material and everything made from it; the chosen model stays."""
     for key in (*_PDF_KEYS, *_STUDY_KEYS, *READER_KEYS, *units.UNIT_KEYS, *cards.CARD_KEYS, *check.CHECK_KEYS,
                 *quiz.QUIZ_KEYS, *navigation.NAVIGATION_KEYS):
         st.session_state.pop(key, None)
@@ -178,7 +178,7 @@ def render_outline_progress(page_count: int) -> None:
 
 def prepare_outline(pages: Sequence[PdfPage], has_key: bool) -> outline.Outline | None:
     """The outline once it is made; None while it is being made (see `render_outline_progress`), or
-    when it cannot be. Without a key nothing is sent, and the outline starts once the key is entered.
+    when it cannot be. Without a key nothing is sent.
 
     As soon as the outline is ready, the study units are planned in the background."""
     start_outline(pages, has_key)
@@ -199,7 +199,7 @@ def render_outline_status(pages: Sequence[PdfPage], has_key: bool) -> None:
         st.warning("This PDF has no readable text, so no outline can be made from it. Go back and choose a "
                    "PDF with selectable text.")
     elif not has_key:
-        st.info("Enter your OpenAI API key in the settings. The outline is made as soon as it is in.")
+        st.error(settings.NO_KEY)
     elif "outline_error" in st.session_state:
         st.error(st.session_state.outline_error)
         st.button("Try again", key="outline_retry", type="primary",

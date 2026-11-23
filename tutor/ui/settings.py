@@ -1,13 +1,13 @@
-"""The learner's own OpenAI key and model: in the first setup step, then in the settings at the top
-of the page. The app has no key of its own.
-
-The key stays in this browser session only: it is not saved, and never written to the process
-environment shared by every session. The fields are drawn in different places at different times,
-and Streamlit drops a widget's value while it is not drawn, so their values are also kept in plain
-session keys.
+"""The OpenAI key and the model. The key is the server's: `OPENAI_API_KEY` in the environment, or in a
+`.env` file at the project root (on Streamlit Cloud, a root-level secret of that name). Learners only
+choose the model: in the first setup step, then in the settings at the top of the page. The field is
+drawn in different places at different times, and Streamlit drops a widget's value while it is not
+drawn, so its value is also kept in a plain session key.
 """
 
 from hashlib import sha256
+import os
+from pathlib import Path
 
 import streamlit as st
 
@@ -17,14 +17,18 @@ from tutor.llm import DEFAULT_MODEL, FALLBACK_MODEL, LLMError, list_models
 OTHER = "Other…"
 # Recommended models, newest first. Each was checked with structured outputs and tool calls, the two
 # things the tutor needs. Pro models (about 50 s a call) and code-only models are left out here but
-# still appear among the learner's other models once their key is entered.
+# still appear among the account's other models.
 RECOMMENDED_MODELS = (
     "gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna", "gpt-6-astra",
     "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano",
     "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano", "o3", "gpt-4.1", "gpt-4.1-mini", "gpt-4o",
     "gpt-4o-mini",
 )
-_FIELDS = ("api_key_input", "model_choice", "model_other")
+_FIELDS = ("model_choice", "model_other")
+# Read once, for values the environment does not already have.
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+NO_KEY = ("No OpenAI API key is set for this app. Set OPENAI_API_KEY in the environment or in the .env "
+          "file at the project root, then restart the app.")
 _SAVED = "saved_settings"
 SETTINGS_KEYS = (*_FIELDS, _SAVED, "model_options", "model_options_for", "model_options_error")
 
@@ -36,7 +40,7 @@ def _fingerprint(api_key: str) -> str:
 
 def _load_models(api_key: str) -> None:
     try:
-        with st.spinner("Loading the models your key can use…"):
+        with st.spinner("Loading the available models…"):
             st.session_state.model_options = list_models(api_key)
         st.session_state.model_options_error = None
     except LLMError as error:
@@ -46,7 +50,7 @@ def _load_models(api_key: str) -> None:
 
 
 def default_model() -> str:
-    """gpt-6-luna, unless the learner's account is known to lack it."""
+    """gpt-6-luna, unless the key's account is known to lack it."""
     loaded = st.session_state.get("model_options") or []
     if not loaded or DEFAULT_MODEL in loaded:
         return DEFAULT_MODEL
@@ -56,7 +60,7 @@ def default_model() -> str:
 def _model_choices() -> list[str]:
     """The default first, then recommended models newest first, then the account's other models.
 
-    Once the learner's key is loaded, recommended models their account lacks are left out.
+    Once the key's models are loaded, recommended models the account lacks are left out.
     """
     loaded = st.session_state.get("model_options") or []
     if loaded:
@@ -86,16 +90,19 @@ def _save() -> None:
 
 
 def render_settings(horizontal: bool = False) -> None:
-    """The key and model fields, side by side or one above the other."""
+    """The model field; in the first step, beside a note on the key."""
     _restore()
+    _ensure_models()
     if horizontal:
-        key_column, model_column = st.columns([3, 2], vertical_alignment="top")
+        model_column, _ = st.columns([2, 3])
     else:
-        key_column = model_column = st.container()
-    with key_column:
-        render_key()
+        model_column = st.container()
     with model_column:
         render_model()
+    if current_key() is None:
+        st.error(NO_KEY)
+    elif st.session_state.get("model_options_error"):
+        st.error(st.session_state.model_options_error)
     _save()
 
 
@@ -106,9 +113,26 @@ def _value(key: str):
     return st.session_state.get(_SAVED, {}).get(key)
 
 
+def _read_env_file(path: Path) -> dict[str, str]:
+    """`NAME=value` lines; blank lines, comments and `export ` are allowed, quotes are removed."""
+    values = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.removeprefix("export ").split("=", 1)
+        values[name.strip()] = value.strip().strip("\"'")
+    return values
+
+
 def current_key() -> str | None:
-    """The learner's key, or None until entered."""
-    return (_value("api_key_input") or "").strip() or None
+    """The server's OpenAI key, or None when none is set."""
+    key = os.environ.get("OPENAI_API_KEY") or _read_env_file(ENV_FILE).get("OPENAI_API_KEY")
+    return (key or "").strip() or None
 
 
 def current_model() -> str:
@@ -118,19 +142,11 @@ def current_model() -> str:
     return (_value("model_other") or "").strip() or default_model()
 
 
-def render_key() -> str | None:
-    """The key field, hidden as typed; its eye button shows it. Returns the key, or None until entered."""
-    api_key = st.text_input(
-        "OpenAI API key", type="password", key="api_key_input", placeholder="sk-…", autocomplete="off",
-        help="Used only in this browser session to call OpenAI. It is not saved. The eye button shows or "
-             "hides it.",
-    ).strip()
-    # Load the learner's models once per key they enter.
+def _ensure_models() -> None:
+    """Load the models the key's account has, once per key."""
+    api_key = current_key()
     if api_key and st.session_state.get("model_options_for") != _fingerprint(api_key):
         _load_models(api_key)
-    if api_key and st.session_state.get("model_options_error"):
-        st.error(st.session_state.model_options_error)
-    return api_key or None
 
 
 def render_model() -> str:
@@ -140,7 +156,7 @@ def render_model() -> str:
         st.session_state.model_choice = choices[0]
     choice = st.selectbox(
         "Model", choices, key="model_choice", format_func=_label,
-        help=f"The default is {DEFAULT_MODEL} ({FALLBACK_MODEL} when your account does not have it); newer "
+        help=f"The default is {DEFAULT_MODEL} ({FALLBACK_MODEL} when the account does not have it); newer "
              "models follow. The tutor needs a model that supports tool calls and structured outputs; if a "
              "model fails, switch back to the default.",
     )
