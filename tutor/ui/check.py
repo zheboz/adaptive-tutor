@@ -339,7 +339,7 @@ def render_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> bool:
             item, choice = answered[-1]
             with st.container(border=True, key=f"check_last_feedback_{item.id}"):
                 render_feedback(len(answered), titles[item.unit_id], item.question, choice,
-                                f"check_feedback_{item.id}")
+                                f"check_feedback_{len(answered)}_{item.id}")
         question = step.question.question
         with st.container(key="check_question"):
             st.html(_progress_dots(step.number, session.config.max_questions))
@@ -352,8 +352,12 @@ def render_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> bool:
                                   key=f"check_choice_{step.question.id}", label_visibility="collapsed")
                 submitted = st.form_submit_button("Submit answer")
         if submitted and choice is not None:
-            answered.append((step.question, question.options.index(choice)))
-            _advance(check, question.options.index(choice))
+            # A second click while the tutor was still choosing its next step can submit the same
+            # question again, after the first run was cut off before the step changed. Record the
+            # answer once, and carry on from it.
+            if not answered or answered[-1][0].id != step.question.id:
+                answered.append((step.question, question.options.index(choice)))
+            _advance(check, answered[-1][1])
             st.rerun()
         st.button("Stop check", key="check_stop", on_click=end_check)
         return True
@@ -393,7 +397,8 @@ def render_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> bool:
     if answered:
         with st.expander(f"Your answers in this check ({len(answered)})", expanded=True):
             for number, (item, choice) in enumerate(answered, start=1):
-                render_feedback(number, titles[item.unit_id], item.question, choice, f"check_feedback_{item.id}")
+                render_feedback(number, titles[item.unit_id], item.question, choice,
+                                f"check_feedback_{number}_{item.id}")
     trace = session.trace
     st.caption(f"This check: {trace.model_calls} model calls · {trace.total_tokens} tokens")
     st.button("Continue", key="check_close", type="primary", on_click=end_check)

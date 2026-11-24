@@ -201,6 +201,22 @@ class CheckUITests(UITestCase):
         self.assertEqual(len(self.model.seen), calls)
         self.assertNotIn(1, self.app.session_state["check_head_starts"])
 
+    def test_a_repeated_submit_is_recorded_once(self):
+        self.model.turns += [
+            turn("ask_question", 1, unit_id="unit-1", reason="Check today's unit."),
+            turn("finish", 2, primary_gap="none", status="uncertain", evidence=[qid("unit-1", 1)],
+                 next_step="continue", summary="Assignment looks fine so far."),
+        ]
+        button(self.panel(), "Check my understanding").click().run()
+        # On a slow server, a second click cuts the first run off before the tutor's next step, so
+        # the same question is submitted again.
+        with patch("tutor.ui.check._advance"):
+            self.answer(qid("unit-1", 1), "2")
+        self.answer(qid("unit-1", 1), "2")
+        self.assertEqual(len(self.app.session_state["check"]["answered"]), 1)
+        self.assertIn("Your answers in this check (1)", [e.label for e in self.panel().expander])
+        self.assertIn("The plan is unchanged.", self.text())
+
     def test_a_day_with_nothing_to_ask_says_why(self):
         self.questions_fail(InsufficientEvidence("The assigned pages have no teaching point to assess."))
         calls = len(self.model.seen)
@@ -298,4 +314,5 @@ class KnowledgeCardUITests(CheckUITests):
     test_a_day_with_nothing_to_ask_says_why = None
     test_questions_that_fail_verification_can_be_prepared_again = None
     test_an_outage_can_be_retried_or_the_check_stopped = None
+    test_a_repeated_submit_is_recorded_once = None
     test_the_check_hides_the_pdf_and_opens_sources_in_a_window = None
