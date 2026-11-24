@@ -16,3 +16,6 @@ __pycache__/
 
 # macOS metadata
 .DS_Store
+
+# The poisoned copy of the course slides that eval/safety.py builds; it holds the course material.
+eval/results/poisoned_*.pdf
