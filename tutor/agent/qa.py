@@ -5,7 +5,7 @@ again or read more pages. Code checks every citation against a page retrieved fo
 No Streamlit code belongs here.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 import json
 import time
@@ -81,6 +81,13 @@ class _Turn:
     seen: set[str] = field(default_factory=set)
     searches: int = 0
     steps: list[str] = field(default_factory=list)
+    # Called with each step as it happens, so a waiting learner can watch the tutor work.
+    on_step: Callable[[str], None] | None = None
+
+    def log(self, step: str) -> None:
+        self.steps.append(step)
+        if self.on_step is not None:
+            self.on_step(step)
 
 
 def _pages_text(source_ids: Sequence[str]) -> str:
@@ -154,7 +161,7 @@ def _search(session: QASession, turn: _Turn, query: str, span_name: str) -> list
     turn.seen.update(p.source_id for p in found)
     record_span(Span(span_name, time.perf_counter() - start,
                      detail=f"{query} → {', '.join(p.source_id for p in found) or 'nothing'}"))
-    turn.steps.append(f"Searched “{query}” → {_pages_text(list(dict.fromkeys(p.source_id for p in found)))}")
+    turn.log(f"Searched “{query}” → {_pages_text(list(dict.fromkeys(p.source_id for p in found)))}")
     return [{"page": p.source_id, "text": p.text} for p in found]
 
 
@@ -190,15 +197,17 @@ def _run_tool(session: QASession, turn: _Turn, call: ToolCall) -> dict[str, Any]
             return {"error": f"{page!r} is not a readable page of the material."}
         turn.seen.add(page)
         span(page)
-        turn.steps.append(f"Read page {page[1:]}")
+        turn.log(f"Read page {page[1:]}")
         return {"page": page, "text": session.pages[page][:READ_PAGE_CHARS]}
 
     if call.name == "answer":
         checked = _check_answer(session, turn, args)
         if isinstance(checked, str):
             span(error=checked)
+            turn.log("A quote failed the check against its page; writing the answer again")
             return {"error": checked}
         span(", ".join(c.source_id for c in checked.citations))
+        turn.log(f"Checked every quote against its page ({_pages_text(sorted({c.source_id for c in checked.citations}, key=lambda i: int(i[1:])))})")
         return checked
 
     if call.name == "cannot_answer":
@@ -213,8 +222,10 @@ def _run_tool(session: QASession, turn: _Turn, call: ToolCall) -> dict[str, Any]
     return {"error": f"Unknown tool {call.name!r}."}
 
 
-def ask(session: QASession, question: str, context: dict[str, Any] | None = None) -> Reply:
-    """Answer one question; model errors propagate so the learner can retry."""
+def ask(session: QASession, question: str, context: dict[str, Any] | None = None,
+        on_step: Callable[[str], None] | None = None) -> Reply:
+    """Answer one question; model errors propagate so the learner can retry. `on_step` is called with
+    each search, page read and quote check as it happens."""
     question = " ".join(question.split())[:MAX_QUESTION_CHARS]
     if not question:
         raise ValueError("Ask a question.")
@@ -223,7 +234,7 @@ def ask(session: QASession, question: str, context: dict[str, Any] | None = None
         items += [{"role": "user", "content": earlier}, {"role": "assistant", "content": reply.text}]
     tools = _tools(list(session.pages))
     final_tools = [tool for tool in tools if tool["name"] in FINAL_TOOLS]
-    turn = _Turn(question)
+    turn = _Turn(question, on_step=on_step)
     reply: Reply | None = None
     calls = 0
     with tracing(session.trace):

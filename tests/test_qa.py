@@ -99,13 +99,27 @@ class AskTests(unittest.TestCase):
             turn("read_page", 3, page="p4"),
             turn("answer", 4, text="It runs 3 times.", citations=[{"page": "p4", "quote": "runs its body 3 times"}]),
         )
-        reply = ask(self.session, "What does the loop do?")
+        live = []
+        reply = ask(self.session, "What does the loop do?", on_step=live.append)
         self.assertEqual(reply.kind, "answer")
-        self.assertEqual(len(reply.steps), 3)
+        self.assertEqual(len(reply.steps), 4)
         self.assertTrue(reply.steps[0].startswith("Searched “What does the loop do?” → "))
         self.assertTrue(reply.steps[1].startswith("Searched “range(3) loop” → p4"))
         self.assertEqual(reply.steps[2], "Read page 4")
+        self.assertEqual(reply.steps[3], "Checked every quote against its page (p4)")
         self.assertEqual(reply.model_calls, 4)
+        # Each step was reported as it happened, the same steps the reply keeps.
+        self.assertEqual(live, list(reply.steps))
+
+    def test_a_rejected_quote_is_a_step_too(self):
+        self.script(
+            turn("answer", 1, text="Loops repeat.", citations=[{"page": "p4", "quote": "runs its body 3 times"}]),
+            turn("read_page", 2, page="p4"),
+            turn("answer", 3, text="Loops repeat.", citations=[{"page": "p4", "quote": "runs its body 3 times"}]),
+        )
+        reply = ask(self.session, "Explain repetition.")
+        self.assertIn("A quote failed the check against its page; writing the answer again", reply.steps)
+        self.assertEqual(reply.steps[-2:], ("Read page 4", "Checked every quote against its page (p4)"))
 
     def test_declines_only_after_searching(self):
         model = self.script(

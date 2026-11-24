@@ -51,13 +51,20 @@ def render_tutor_chat(pages: Sequence[PdfPage], result: Outline | None, height: 
     question = chat.chat_input("Ask about your material", key="tutor_question")
     error = None
     if question:
+        # While the tutor works, show the question and each step it takes; the steps stay under the
+        # answer afterwards, in "How the tutor found this".
+        working = messages.empty()
+        with working.container():
+            with st.chat_message("user"):
+                st.text(question)
+            status = st.status("The tutor is searching your material…", expanded=True)
         try:
-            with st.spinner("Searching your material…"):
-                ask(session, question, context)
+            ask(session, question, context, on_step=status.write)
         except LLMError as failure:
             error = str(failure)
         except ValueError:
             pass
+        working.empty()
 
     with messages:
         if not session.log:
