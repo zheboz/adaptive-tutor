@@ -6,7 +6,7 @@ No Streamlit code belongs here.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import time
 from typing import Any, Literal
@@ -61,6 +61,10 @@ class Reply:
     text: str
     citations: tuple[Citation, ...] = ()
     missing_topic: str | None = None
+    # What the tutor did for this question, in order, for the learner to see: each search with the pages
+    # it found, each page read, and how many model calls it took.
+    steps: tuple[str, ...] = ()
+    model_calls: int = 0
 
 
 @dataclass
@@ -76,6 +80,11 @@ class _Turn:
     question: str
     seen: set[str] = field(default_factory=set)
     searches: int = 0
+    steps: list[str] = field(default_factory=list)
+
+
+def _pages_text(source_ids: Sequence[str]) -> str:
+    return ", ".join(f"p{source_id[1:]}" for source_id in source_ids) or "nothing"
 
 
 def start_qa(pages: Sequence[PdfPage], index: retrieval.PassageIndex | None = None) -> QASession:
@@ -145,6 +154,7 @@ def _search(session: QASession, turn: _Turn, query: str, span_name: str) -> list
     turn.seen.update(p.source_id for p in found)
     record_span(Span(span_name, time.perf_counter() - start,
                      detail=f"{query} → {', '.join(p.source_id for p in found) or 'nothing'}"))
+    turn.steps.append(f"Searched “{query}” → {_pages_text(list(dict.fromkeys(p.source_id for p in found)))}")
     return [{"page": p.source_id, "text": p.text} for p in found]
 
 
@@ -180,6 +190,7 @@ def _run_tool(session: QASession, turn: _Turn, call: ToolCall) -> dict[str, Any]
             return {"error": f"{page!r} is not a readable page of the material."}
         turn.seen.add(page)
         span(page)
+        turn.steps.append(f"Read page {page[1:]}")
         return {"page": page, "text": session.pages[page][:READ_PAGE_CHARS]}
 
     if call.name == "answer":
@@ -214,6 +225,7 @@ def ask(session: QASession, question: str, context: dict[str, Any] | None = None
     final_tools = [tool for tool in tools if tool["name"] in FINAL_TOOLS]
     turn = _Turn(question)
     reply: Reply | None = None
+    calls = 0
     with tracing(session.trace):
         passages = _search(session, turn, question, "retrieval:initial_search")
         items.append({"role": "user", "content": json.dumps(
@@ -222,6 +234,7 @@ def ask(session: QASession, question: str, context: dict[str, Any] | None = None
         for attempt in range(MAX_MODEL_CALLS):
             offered = final_tools if attempt == MAX_MODEL_CALLS - 1 else tools
             result = call_with_tools(instructions=INSTRUCTIONS, items=items, tools=offered, name="model:tutor")
+            calls += 1
             items.extend(result.items)
             for call in result.calls:
                 if reply is not None:
@@ -238,5 +251,6 @@ def ask(session: QASession, question: str, context: dict[str, Any] | None = None
     if reply is None:
         reply = Reply("failed", "I couldn't find a verified answer in your material. "
                                 "Try asking again with the words your material uses.")
+    reply = replace(reply, steps=tuple(turn.steps), model_calls=calls)
     session.log.append((question, reply))
     return reply

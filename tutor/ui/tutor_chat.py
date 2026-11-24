@@ -78,6 +78,11 @@ def render_tutor_chat(pages: Sequence[PdfPage], result: Outline | None, height: 
                     with st.expander("Quoted from your material"):
                         for citation in reply.citations:
                             st.caption(f"Page {citation.source_id[1:]}: “{citation.quote}”")
+                if reply.steps:
+                    calls = f" · {reply.model_calls} model call{'s' if reply.model_calls != 1 else ''}"
+                    with st.expander(f"How the tutor found this{calls if reply.model_calls else ''}"):
+                        for step in reply.steps:
+                            st.caption(step)
         if error:
             st.error(error)
     if session.log:

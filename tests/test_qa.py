@@ -92,6 +92,21 @@ class AskTests(unittest.TestCase):
         self.assertIn("at least one", errors[3])
         self.assertEqual((reply.kind, reply.citations), ("answer", (Citation("p4", "runs its body 3 times"),)))
 
+    def test_the_reply_lists_the_steps_the_tutor_took(self):
+        self.script(
+            turn("search_material", 1, query="What does the loop do?"),   # rejected: the question itself
+            turn("search_material", 2, query="range(3) loop"),
+            turn("read_page", 3, page="p4"),
+            turn("answer", 4, text="It runs 3 times.", citations=[{"page": "p4", "quote": "runs its body 3 times"}]),
+        )
+        reply = ask(self.session, "What does the loop do?")
+        self.assertEqual(reply.kind, "answer")
+        self.assertEqual(len(reply.steps), 3)
+        self.assertTrue(reply.steps[0].startswith("Searched “What does the loop do?” → "))
+        self.assertTrue(reply.steps[1].startswith("Searched “range(3) loop” → p4"))
+        self.assertEqual(reply.steps[2], "Read page 4")
+        self.assertEqual(reply.model_calls, 4)
+
     def test_declines_only_after_searching(self):
         model = self.script(
             turn("cannot_answer", 1, reason="Not covered.", missing_topic="recursion"),
@@ -215,6 +230,10 @@ class TutorChatUITests(UITestCase):
             self.assertEqual(context["todays_units"][0]["title"], "Updating")
             panel = self.app.main.container("tutor_chat_panel")
             self.assertIn("It **adds one** to x.", [m.value for m in panel.markdown])
+            # What the tutor did is shown under its answer: its searches with the pages found, and its calls.
+            self.assertIn("How the tutor found this · 2 model calls", [e.label for e in panel.expander])
+            steps = [c.value for c in panel.caption]
+            self.assertTrue(any(step.startswith("Searched “x = x + 1” → p2") for step in steps), steps)
             panel.button(key="qa_0_p2").click().run()
             # The cited page opens in the reader beside the chat; the chat stays open.
             self.assertEqual(previewed_pdf(self.app), (self.document, [2]))
