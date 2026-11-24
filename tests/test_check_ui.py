@@ -1,4 +1,5 @@
 import json
+import unittest
 from unittest.mock import patch
 
 from tests.test_agent_loop import ScriptedModel, turn
@@ -316,3 +317,35 @@ class KnowledgeCardUITests(CheckUITests):
     test_an_outage_can_be_retried_or_the_check_stopped = None
     test_a_repeated_submit_is_recorded_once = None
     test_the_check_hides_the_pdf_and_opens_sources_in_a_window = None
+
+
+class SubmitAnswerTests(unittest.TestCase):
+    """Two runs of the script at once, as a second click while the tutor is thinking starts."""
+
+    def test_two_runs_submitting_the_same_question_advance_the_check_once(self):
+        import threading
+        import time
+        from types import SimpleNamespace
+
+        from tutor.ui import check as check_ui
+
+        step = SimpleNamespace(question=SimpleNamespace(id="q1"))
+        check = {"step": step, "answered": [], "error": None}
+        calls = []
+
+        def slow_advance(check, answer):
+            calls.append(answer)
+            time.sleep(0.2)  # the model call
+            check["step"] = SimpleNamespace(question=SimpleNamespace(id="q2"))
+
+        with patch.object(check_ui, "_advance", side_effect=slow_advance):
+            results = []
+            runs = [threading.Thread(target=lambda: results.append(check_ui.submit_answer(check, step, 1)))
+                    for _ in range(2)]
+            for run in runs:
+                run.start()
+            for run in runs:
+                run.join()
+        self.assertEqual(calls, [1])
+        self.assertEqual(sorted(results), [False, True])
+        self.assertEqual([item.id for item, _ in check["answered"]], ["q1"])

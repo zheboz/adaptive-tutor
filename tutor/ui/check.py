@@ -12,6 +12,7 @@ and feedback on it appears before the next question.
 from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 import contextvars
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -69,7 +70,28 @@ def plan_changes() -> list[PlanChange]:
 def start_daily_check(day: int) -> None:
     """Questions are prepared when the panel next renders, where a spinner can show."""
     st.session_state.check = {"day": day, "session": None, "step": None, "error": None,
-                              "applied": False, "change": None, "answered": [], "empty": None}
+                              "applied": False, "change": None, "answered": [], "empty": None,
+                              "lock": threading.Lock()}
+
+
+def _lock(check: dict[str, Any]) -> threading.Lock:
+    """One run at a time moves a check on. A click while the tutor is still working starts a second
+    run of the script beside the first, and two runs advancing the same agent interleave its
+    conversation, leaving a tool call with no output that the API then rejects."""
+    return check.setdefault("lock", threading.Lock())
+
+
+def submit_answer(check: dict[str, Any], step: Ask, choice: int) -> bool:
+    """Record the learner's answer to `step` and move the check on, once. False when another run has
+    already moved past this question, so this submit is a repeat to drop."""
+    with _lock(check):
+        if check["step"] is not step:
+            return False
+        answered = check["answered"]
+        if not answered or answered[-1][0].id != step.question.id:
+            answered.append((step.question, choice))
+        _advance(check, answered[-1][1])
+        return True
 
 
 @dataclass
@@ -299,8 +321,10 @@ def render_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> bool:
     st.caption("Answer from what you learned: the PDF is hidden until the check ends.")
 
     if check["session"] is None and check["empty"] is None and not check["error"]:
-        if not _use_head_start(check, units, pages):
-            _prepare(check, units, pages)
+        with _lock(check):
+            if check["session"] is None and check["empty"] is None and not check["error"]:
+                if not _use_head_start(check, units, pages):
+                    _prepare(check, units, pages)
     if check["empty"] is not None:
         retry = check.get("retry") or []
         if retry:
@@ -319,7 +343,9 @@ def render_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> bool:
                           args=(units, pages, retry))
         return True
     if check["session"] is not None and check["step"] is None and not check["error"]:
-        _advance(check, None)
+        with _lock(check):
+            if check["step"] is None and not check["error"]:
+                _advance(check, None)
     if check["error"]:
         st.error(check["error"])
         with st.container(horizontal=True):
@@ -352,12 +378,9 @@ def render_check(units: Sequence[StudyUnit], pages: Sequence[PdfPage]) -> bool:
                                   key=f"check_choice_{step.question.id}", label_visibility="collapsed")
                 submitted = st.form_submit_button("Submit answer")
         if submitted and choice is not None:
-            # A second click while the tutor was still choosing its next step can submit the same
-            # question again, after the first run was cut off before the step changed. Record the
-            # answer once, and carry on from it.
-            if not answered or answered[-1][0].id != step.question.id:
-                answered.append((step.question, question.options.index(choice)))
-            _advance(check, answered[-1][1])
+            # A second click while the tutor is still choosing its next step submits this question
+            # again, in a run beside the first; submit_answer records and advances it once.
+            submit_answer(check, step, question.options.index(choice))
             st.rerun()
         st.button("Stop check", key="check_stop", on_click=end_check)
         return True
